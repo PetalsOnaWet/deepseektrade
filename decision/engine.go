@@ -278,14 +278,13 @@ func buildSystemPrompt(accountEquity float64, btcEthLeverage, altcoinLeverage in
 	sb.WriteString("# 🛡️ 风险保护与跟踪计划\n\n")
 	sb.WriteString("开仓时必须提供 `protection` 字段，指导系统动态风控。所有百分比均指标的价格相对入场价的变动（不放大杠杆）。\n\n")
 	sb.WriteString("- `min_hold_minutes` 按趋势力度设定：强趋势建议≥1440（24小时），弱趋势建议≥720；若设定更短，必须在 `notes` 中说明逻辑\n")
-	sb.WriteString("- `breakeven_trigger_pct` 固定为3（指标的实际行情波动3%）；行情顺利扩张3%后必须把止损抬到保本\n")
-	sb.WriteString("- `breakeven_offset_pct` 用于留出缓冲（如0.2表示保本止损设置在入场价上方0.2%）\n")
-	sb.WriteString("- `trail_activation_pct` ≥ breakeven_trigger_pct，盈利达到该阈值后启用追踪止损\n")
-	sb.WriteString("- `trail_distance_pct` 建议 0.8~1.5，表示追踪止损与最新价保持的百分比距离\n")
-	sb.WriteString("- `exit_mode`: `fixed`（使用明确止盈价）、`trailing`（依赖追踪止损）、`reversal`（等待趋势反转时由你主动发出平仓指令，可结合 `reversal_trigger_pct`）\n")
-	sb.WriteString("- `reversal_trigger_pct`：当选择`reversal`时，用于量化“确认反转”所需的回撤或背离幅度\n")
-	sb.WriteString("- 盈利扩张过程中必须持续动态更新止损：`trailing` 模式要随着价格推升止损，`reversal` 模式也需在条件满足时主动下移止损并准备平仓\n")
-	sb.WriteString("- 根据趋势强弱可在 `notes` 中说明调整逻辑，并在每轮输出时写明是否调整保护计划及原因\n\n")
+	sb.WriteString("- `breakeven_trigger_pct` 固定为 3（真实行情涨跌 3%）；达到后必须把止损抬到保本（可留 0~0.2% 缓冲）\n")
+	sb.WriteString("- `trail_activation_pct` 至少比保本触发高 1.5%（建议设置在 4.5%~6% 区间），代表行情进一步扩张时启动追踪止损\n")
+	sb.WriteString("- `trail_distance_pct` 随波动自适应：常规建议 0.8~1.5%，可结合 ATR/波动率在 `notes` 中说明；当波动放大或跨周末时可适度放宽\n")
+	sb.WriteString("- 盈利加速时要阶梯收紧追踪距离（例如 5% 盈利→1.2%，8%→1.0%，12%→0.8%），同时保留高于保本的止损，不得回调到更低价位\n")
+	sb.WriteString("- 可以在极端行情中主动减仓锁盈，再对剩余仓位继续使用追踪止损；减仓逻辑需在 `notes` 说明\n")
+	sb.WriteString("- `exit_mode`: `fixed`（使用明确止盈价）、`trailing`（依赖追踪止损）、`reversal`（等待趋势反转时由你主动发出平仓指令，可结合 `reversal_trigger_pct`）；若选择 `reversal` 必须说明触发信号\n")
+	sb.WriteString("- 每轮决策都要评估是否需要根据最新波动调整追踪距离或缓冲；若未调整，也需写明原因\n\n")
 
 	// === 开仓信号强度 ===
 	sb.WriteString("# 🎯 开仓标准（严格）\n\n")
@@ -829,7 +828,7 @@ func validateProtectionPlan(plan *ProtectionPlan) error {
 		return fmt.Errorf("min_hold_minutes 过低(%d)，建议至少20分钟以避免噪音交易", plan.MinHoldMinutes)
 	}
 	if math.Abs(plan.BreakEvenTriggerPct-3.0) > 0.2 {
-		return fmt.Errorf("breakeven_trigger_pct %.2f%% 必须紧贴3%% (实际行情波动)", plan.BreakEvenTriggerPct)
+		return fmt.Errorf("breakeven_trigger_pct %.2f%% 必须贴近3%% (真实行情波动)", plan.BreakEvenTriggerPct)
 	}
 	if plan.BreakEvenOffsetPct < -1.0 || plan.BreakEvenOffsetPct > 1.0 {
 		return fmt.Errorf("breakeven_offset_pct %.2f%% 超出范围(-1%%~1%%)", plan.BreakEvenOffsetPct)
@@ -837,20 +836,24 @@ func validateProtectionPlan(plan *ProtectionPlan) error {
 	if plan.TrailActivationPct == 0 {
 		plan.TrailActivationPct = plan.BreakEvenTriggerPct
 	}
-	if plan.TrailActivationPct < plan.BreakEvenTriggerPct {
-		return fmt.Errorf("trail_activation_pct %.2f%% 必须 ≥ breakeven_trigger_pct %.2f%%", plan.TrailActivationPct, plan.BreakEvenTriggerPct)
+	minTrailActivation := plan.BreakEvenTriggerPct + 1.5
+	if plan.TrailActivationPct < minTrailActivation {
+		return fmt.Errorf("trail_activation_pct %.2f%% 过低，应≥%.2f%%以保证阶梯追踪逻辑", plan.TrailActivationPct, minTrailActivation)
+	}
+	if plan.TrailActivationPct > 12 {
+		return fmt.Errorf("trail_activation_pct %.2f%% 过高，请控制在12%%以内", plan.TrailActivationPct)
 	}
 	if exitMode == "reversal" {
 		if plan.ReversalTriggerPct <= 0 {
 			return fmt.Errorf("reversal_trigger_pct 必须大于0，用于量化反转止盈触发条件")
 		}
 		// 反转策略下若未使用追踪止损，可允许distance为0
-		if plan.TrailDistancePct < 0 || plan.TrailDistancePct > 5 {
-			return fmt.Errorf("trail_distance_pct %.2f%% 无效，需在0-5%%之间", plan.TrailDistancePct)
+		if plan.TrailDistancePct <= 0.3 || plan.TrailDistancePct > 3 {
+			return fmt.Errorf("trail_distance_pct %.2f%% 无效，需在0.3-3%%之间", plan.TrailDistancePct)
 		}
 	} else {
-		if plan.TrailDistancePct <= 0 || plan.TrailDistancePct > 5 {
-			return fmt.Errorf("trail_distance_pct %.2f%% 无效，需在0-5%%之间", plan.TrailDistancePct)
+		if plan.TrailDistancePct <= 0.3 || plan.TrailDistancePct > 3 {
+			return fmt.Errorf("trail_distance_pct %.2f%% 无效，需在0.3-3%%之间", plan.TrailDistancePct)
 		}
 	}
 	return nil
