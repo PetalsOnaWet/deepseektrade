@@ -242,10 +242,9 @@ func buildSystemPrompt(accountEquity float64, btcEthLeverage, altcoinLeverage in
 	// === 硬约束（风险控制）===
 	sb.WriteString("# ⚖️ 硬约束（风险控制）\n\n")
 	sb.WriteString("1. **风险回报比**: 必须 ≥ 1:3（冒1%风险，赚3%+收益）\n")
-	sb.WriteString("2. **最多持仓**: 3个币种（质量>数量）\n")
-	sb.WriteString(fmt.Sprintf("3. **单币仓位**: 山寨%.0f-%.0f U(%dx杠杆) | BTC/ETH %.0f-%.0f U(%dx杠杆)\n",
+	sb.WriteString(fmt.Sprintf("2. **单币仓位**: 山寨%.0f-%.0f U(%dx杠杆) | BTC/ETH %.0f-%.0f U(%dx杠杆)\n",
 		accountEquity*0.8, accountEquity*1.5, altcoinLeverage, accountEquity*5, accountEquity*10, btcEthLeverage))
-	sb.WriteString("4. **保证金**: 总使用率 ≤ 90%\n\n")
+	sb.WriteString("3. **风险敞口**: 开仓后风险USD总和必须≤账户净值3%，保证金使用率≤90%。仓位数量没有上限，但要确保组合风险集中度可控（不要让同方向仓位风险叠加失控）。\n\n")
 
 	// === 做空激励 ===
 	sb.WriteString("# 📉 做多做空平衡\n\n")
@@ -260,7 +259,7 @@ func buildSystemPrompt(accountEquity float64, btcEthLeverage, altcoinLeverage in
 	sb.WriteString("**量化标准**:\n")
 	sb.WriteString("- 优秀交易员：每天2-4笔 = 每小时0.1-0.2笔\n")
 	sb.WriteString("- 过度交易：每小时>2笔 = 严重问题\n")
-	sb.WriteString("- 最佳节奏：开仓后持有至少30-60分钟\n\n")
+	sb.WriteString("- 趋势行情下优先长时间持有，避免短线频繁换手\n\n")
 	sb.WriteString("**自查**:\n")
 	sb.WriteString("如果你发现自己每个周期都在交易 → 说明标准太低\n")
 	sb.WriteString("如果你发现持仓<30分钟就平仓 → 说明太急躁\n\n")
@@ -268,16 +267,17 @@ func buildSystemPrompt(accountEquity float64, btcEthLeverage, altcoinLeverage in
 	// === 趋势持仓纪律 ===
 	sb.WriteString("# 📈 趋势持仓纪律\n\n")
 	sb.WriteString("你是一名顺势交易员，目标是在趋势中“拿得住”。\n\n")
-	sb.WriteString("- 趋势未反转前不要提前离场，避免短线频繁换手\n")
-	sb.WriteString("- 参考 3min / 4h / 1d 多周期，只有级别共振才开仓\n")
-	sb.WriteString("- 默认策略：除非出现强烈反向信号或风控触发，目标持仓 30-60 分钟，并在行情反转或达标时主动处理\n")
-	sb.WriteString("- 收益≥预期后，通过追踪止损锁定利润，让盈利继续扩张\n")
-	sb.WriteString("- 如果信号减弱但仍在趋势中，降低仓位而不是立刻清仓\n\n")
+	sb.WriteString("- 当4小时或日线走出趋势突破并与周线方向共振时，建立仓位后允许跨日甚至多日持有，直到4小时或日线结构被破坏、周线转弱或保护计划触发\n")
+	sb.WriteString("- 趋势未反转前不要提前离场，避免短线频繁换手；若趋势确实减弱，可主动发出减仓或平仓指令\n")
+	sb.WriteString("- 参考 3min / 4h / 1d / 1w 多周期，只有级别共振才开仓\n")
+	sb.WriteString("- 默认倾向：强趋势行情下把 `min_hold_minutes` 设为≥1440（24小时），弱趋势也建议≥720；如需缩短持有时间，必须在思维链中说明原因\n")
+	sb.WriteString("- 收益≥预期后，通过追踪止损锁定利润，并随着价格抬升止损位置；若仅做提醒而未实际调整，会被视为未执行\n")
+	sb.WriteString("- 如果信号减弱但仍在趋势中，可分批减仓，同时保留核心仓位，让利润继续奔跑\n\n")
 
 	// === 风险保护 ===
 	sb.WriteString("# 🛡️ 风险保护与跟踪计划\n\n")
 	sb.WriteString("开仓时必须提供 `protection` 字段，指导系统动态风控。所有百分比均指标的价格相对入场价的变动（不放大杠杆）。\n\n")
-	sb.WriteString("- `min_hold_minutes` 建议≥30，根据趋势力度设定，并说明何时允许提前退出\n")
+	sb.WriteString("- `min_hold_minutes` 按趋势力度设定：强趋势建议≥1440（24小时），弱趋势建议≥720；若设定更短，必须在 `notes` 中说明逻辑\n")
 	sb.WriteString("- `breakeven_trigger_pct` ≈ 3，表示行情顺利走出约3%后，把止损抬到保本\n")
 	sb.WriteString("- `breakeven_offset_pct` 用于留出缓冲（如0.2表示保本止损设置在入场价上方0.2%）\n")
 	sb.WriteString("- `trail_activation_pct` ≥ breakeven_trigger_pct，盈利达到该阈值后启用追踪止损\n")
@@ -291,11 +291,15 @@ func buildSystemPrompt(accountEquity float64, btcEthLeverage, altcoinLeverage in
 	sb.WriteString("# 🎯 开仓标准（严格）\n\n")
 	sb.WriteString("只在**强信号**时开仓，不确定就观望。\n\n")
 	sb.WriteString("**你拥有的完整数据**：\n")
-	sb.WriteString("- 📊 **原始序列**：3分钟价格序列(MidPrices数组) + 4小时/日线结构化上下文\n")
+	sb.WriteString("- 📊 **原始序列**：3分钟价格序列(MidPrices数组) + 4小时/日线/周线结构化上下文\n")
 	sb.WriteString("- 📈 **技术序列**：EMA20 / MACD / RSI7 / RSI14 等多周期指标\n")
 	sb.WriteString("- 💰 **资金序列**：成交量序列、持仓量(OI)序列、资金费率\n")
 	sb.WriteString("- 🧭 **派生信号**：系统提供的趋势JSON，包括日线/4小时趋势、斜率、波动率比等\n")
 	sb.WriteString("- 🎯 **筛选标记**：AI500评分 / OI_Top排名（如果有标注）\n\n")
+	sb.WriteString("**每轮决策务必覆盖**：\n")
+	sb.WriteString("- 日线与周线趋势是否保持一致，趋势若减弱是否需要降低仓位\n")
+	sb.WriteString("- 当前保护计划是否调整（保本、追踪止损、分批减仓），必须落在 JSON 决策里执行；不要只在文字里提醒\n")
+	sb.WriteString("- 若趋势维持，说明准备跨日持仓的计划；若计划提前退出，说明触发条件\n\n")
 	sb.WriteString("**分析方法**（完全由你自主决定）：\n")
 	sb.WriteString("- 自由运用序列数据，你可以做但不限于趋势分析、K线形态识别、支撑阻力、技术阻力位、斐波那契、波动带计算\n")
 	sb.WriteString("- 多维度交叉验证（价格+量+OI+指标+序列形态）\n")
@@ -343,6 +347,7 @@ func buildSystemPrompt(accountEquity float64, btcEthLeverage, altcoinLeverage in
 	sb.WriteString(fmt.Sprintf("  {\"symbol\": \"BTCUSDT\", \"action\": \"open_short\", \"leverage\": %d, \"position_size_usd\": %.0f, \"stop_loss\": 97000, \"take_profit\": 91000, \"confidence\": 85, \"risk_usd\": 300, \"protection\": {\"strategy\": \"trend_follow\", \"min_hold_minutes\": 60, \"breakeven_trigger_pct\": 3.0, \"breakeven_offset_pct\": 0.2, \"trail_activation_pct\": 4.0, \"trail_distance_pct\": 1.0, \"exit_mode\": \"trailing\"}, \"reasoning\": \"下跌趋势+MACD死叉\"},\n", btcEthLeverage, accountEquity*5))
 	sb.WriteString("  {\"symbol\": \"ETHUSDT\", \"action\": \"close_long\", \"reasoning\": \"止盈离场\"}\n")
 	sb.WriteString("]\n```\n\n")
+	sb.WriteString("若要更新已有仓位的风控计划（比如补充保护、调整止损或分批减仓），务必在数组中加入对应仓位的 `hold`/`wait` 决策并附带 `protection` 字段，系统会自动执行调整。\n\n")
 	sb.WriteString("**字段说明**:\n")
 	sb.WriteString("- `action`: open_long | open_short | close_long | close_short | hold | wait\n")
 	sb.WriteString("- `confidence`: 0-100（开仓建议≥75）\n")
@@ -595,6 +600,58 @@ func validateDecisions(decisions []Decision, ctx *Context) error {
 			return fmt.Errorf("决策 #%d 验证失败: %w", i+1, err)
 		}
 	}
+
+	// 针对当前持仓缺少保护计划的情况，要求本轮决策显式补齐
+	type posKey struct {
+		Symbol string
+		Side   string
+	}
+
+	missingProtection := make(map[posKey]PositionInfo)
+	for _, pos := range ctx.Positions {
+		if pos.Protection == nil && pos.Quantity > 0 {
+			key := posKey{Symbol: pos.Symbol, Side: strings.ToLower(pos.Side)}
+			missingProtection[key] = pos
+		}
+	}
+
+	if len(missingProtection) == 0 {
+		return nil
+	}
+
+	satisfied := make(map[posKey]bool)
+	for _, d := range decisions {
+		switch d.Action {
+		case "close_long":
+			key := posKey{Symbol: d.Symbol, Side: "long"}
+			if _, ok := missingProtection[key]; ok {
+				satisfied[key] = true
+			}
+		case "close_short":
+			key := posKey{Symbol: d.Symbol, Side: "short"}
+			if _, ok := missingProtection[key]; ok {
+				satisfied[key] = true
+			}
+		case "hold", "wait":
+			for key := range missingProtection {
+				if strings.EqualFold(d.Symbol, key.Symbol) && d.Protection != nil {
+					satisfied[key] = true
+				}
+			}
+		}
+	}
+
+	var unresolved []string
+	for key, pos := range missingProtection {
+		if satisfied[key] {
+			continue
+		}
+		unresolved = append(unresolved, fmt.Sprintf("%s(%s)", pos.Symbol, pos.Side))
+	}
+	if len(unresolved) > 0 {
+		return fmt.Errorf("以下持仓缺少保护计划: %s。请在JSON中给出带 `protection` 字段的 hold/wait 决策，或改为 close 指令实现退出。", strings.Join(unresolved, ", "))
+	}
+
 	return nil
 }
 
@@ -740,6 +797,14 @@ func validateDecision(d *Decision, ctx *Context) error {
 			return fmt.Errorf("%s 风险敞口 %.2f USDT 超出账户净值3%%限制 (最大允许 %.2f)", d.Symbol, riskUSD, maxAllowedRisk)
 		}
 		d.RiskUSD = riskUSD
+	}
+
+	if d.Action == "hold" || d.Action == "wait" {
+		if d.Protection != nil {
+			if err := validateProtectionPlan(d.Protection); err != nil {
+				return fmt.Errorf("protection设置无效: %w", err)
+			}
+		}
 	}
 
 	return nil

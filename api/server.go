@@ -3,6 +3,7 @@ package api
 import (
 	"fmt"
 	"log"
+	"math"
 	"net/http"
 	"nofx/logger"
 	"nofx/manager"
@@ -325,6 +326,7 @@ func (s *Server) handleEquityHistory(c *gin.Context) {
 		TotalPnLPct      float64 `json:"total_pnl_pct"`     // 总盈亏百分比
 		PositionCount    int     `json:"position_count"`    // 持仓数量
 		MarginUsedPct    float64 `json:"margin_used_pct"`   // 保证金使用率
+		InitialBalance   float64 `json:"initial_balance"`
 		CycleNumber      int     `json:"cycle_number"`
 	}
 
@@ -335,27 +337,63 @@ func (s *Server) handleEquityHistory(c *gin.Context) {
 		return
 	}
 
-	baselineEquity := records[0].AccountState.TotalBalance
+	currentInitial := trader.GetInitialBalance()
+
+	// 过滤掉初始余额不匹配的历史数据（例如切换初始资金后遗留的日志）
+	var filtered []*logger.DecisionRecord
+	tolerance := math.Max(1.0, currentInitial*0.05) // 允许5%误差，至少1U
+	for _, record := range records {
+		initBal := record.AccountState.InitialBalance
+		if initBal <= 0 {
+			continue
+		}
+		if math.Abs(initBal-currentInitial) > tolerance {
+			continue
+		}
+		filtered = append(filtered, record)
+	}
+
+	if len(filtered) == 0 {
+		if currentInitial > 0 {
+			c.JSON(http.StatusOK, []EquityPoint{})
+			return
+		}
+		filtered = records
+	}
+
+	baselineEquity := currentInitial
+	useConfiguredInitial := len(filtered) > 0 && currentInitial > 0 && math.Abs(filtered[0].AccountState.InitialBalance-currentInitial) <= tolerance
+	if !useConfiguredInitial {
+		baselineEquity = filtered[0].AccountState.TotalBalance
+	}
+
 	if baselineEquity == 0 {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"error": "初始净值无效",
 		})
 		return
 	}
-	baselinePnL := records[0].AccountState.TotalUnrealizedProfit
+
+	baselinePnLOffset := 0.0
+	if !useConfiguredInitial {
+		baselinePnLOffset = filtered[0].AccountState.TotalUnrealizedProfit
+	}
 
 	var history []EquityPoint
-	for _, record := range records {
+	for _, record := range filtered {
 		// TotalBalance字段实际存储的是TotalEquity
 		totalEquity := record.AccountState.TotalBalance
-		// TotalUnrealizedProfit字段实际存储的是TotalPnL（相对配置初始余额）
-		// 为了重置曲线，改用相对本轮起点的盈亏
-		totalPnL := record.AccountState.TotalUnrealizedProfit - baselinePnL
+		totalPnL := record.AccountState.TotalUnrealizedProfit - baselinePnLOffset
 
 		// 计算盈亏百分比
 		totalPnLPct := 0.0
 		if baselineEquity > 0 {
-			totalPnLPct = ((totalEquity - baselineEquity) / baselineEquity) * 100
+			totalPnLPct = (totalPnL / baselineEquity) * 100
+		}
+
+		initialForPoint := record.AccountState.InitialBalance
+		if initialForPoint <= 0 {
+			initialForPoint = baselineEquity
 		}
 
 		history = append(history, EquityPoint{
@@ -366,6 +404,7 @@ func (s *Server) handleEquityHistory(c *gin.Context) {
 			TotalPnLPct:      totalPnLPct,
 			PositionCount:    record.AccountState.PositionCount,
 			MarginUsedPct:    record.AccountState.MarginUsedPct,
+			InitialBalance:   initialForPoint,
 			CycleNumber:      record.CycleNumber,
 		})
 	}

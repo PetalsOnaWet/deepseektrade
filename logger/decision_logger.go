@@ -7,6 +7,8 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"time"
 )
 
@@ -33,6 +35,7 @@ type AccountSnapshot struct {
 	TotalUnrealizedProfit float64 `json:"total_unrealized_profit"`
 	PositionCount         int     `json:"position_count"`
 	MarginUsedPct         float64 `json:"margin_used_pct"`
+	InitialBalance        float64 `json:"initial_balance"`
 }
 
 // PositionSnapshot 持仓快照
@@ -78,10 +81,45 @@ func NewDecisionLogger(logDir string) *DecisionLogger {
 		fmt.Printf("⚠ 创建日志目录失败: %v\n", err)
 	}
 
-	return &DecisionLogger{
+	logger := &DecisionLogger{
 		logDir:      logDir,
 		cycleNumber: 0,
 	}
+
+	// 恢复上一轮的cycle累计，避免重启后从1开始导致历史裁剪
+	logger.cycleNumber = logger.detectLastCycleNumber()
+	return logger
+}
+
+func (l *DecisionLogger) detectLastCycleNumber() int {
+	files, err := ioutil.ReadDir(l.logDir)
+	if err != nil {
+		return 0
+	}
+
+	maxCycle := 0
+	for _, file := range files {
+		if file.IsDir() {
+			continue
+		}
+
+		name := file.Name()
+		if !strings.HasPrefix(name, "decision_") || !strings.HasSuffix(name, ".json") {
+			continue
+		}
+
+		idx := strings.LastIndex(name, "_cycle")
+		if idx == -1 {
+			continue
+		}
+
+		cyclePart := strings.TrimSuffix(name[idx+6:], ".json")
+		if n, err := strconv.Atoi(cyclePart); err == nil && n > maxCycle {
+			maxCycle = n
+		}
+	}
+
+	return maxCycle
 }
 
 // LogDecision 记录决策
@@ -146,20 +184,6 @@ func (l *DecisionLogger) GetLatestRecords(n int) ([]*DecisionRecord, error) {
 	// 反转数组，让时间从旧到新排列（用于图表显示）
 	for i, j := 0, len(records)-1; i < j; i, j = i+1, j-1 {
 		records[i], records[j] = records[j], records[i]
-	}
-
-	// 仅保留最近一次运行的记录：找到最后一次cycleNumber回到1的位置
-	if len(records) > 0 {
-		lastStart := -1
-		for i := len(records) - 1; i >= 0; i-- {
-			if records[i].CycleNumber == 1 {
-				lastStart = i
-				break
-			}
-		}
-		if lastStart > 0 {
-			records = records[lastStart:]
-		}
 	}
 
 	return records, nil

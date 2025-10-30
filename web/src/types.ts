@@ -60,6 +60,7 @@ export interface AccountSnapshot {
   total_unrealized_profit: number;
   position_count: number;
   margin_used_pct: number;
+  initial_balance: number;
 }
 
 export interface DecisionRecord {

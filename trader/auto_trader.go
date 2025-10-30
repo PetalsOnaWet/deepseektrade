@@ -272,6 +272,7 @@ func (at *AutoTrader) runCycle() error {
 		TotalUnrealizedProfit: ctx.Account.TotalPnL,
 		PositionCount:         ctx.Account.PositionCount,
 		MarginUsedPct:         ctx.Account.MarginUsedPct,
+		InitialBalance:        at.initialBalance,
 	}
 
 	// 保存持仓快照
@@ -781,6 +782,51 @@ func (at *AutoTrader) mergeProtectionPlan(symbol string, plan *decision.Protecti
 	return false
 }
 
+func (at *AutoTrader) registerProtectionForExistingPosition(symbol string, plan *decision.ProtectionPlan) bool {
+	if plan == nil {
+		return false
+	}
+
+	positions, err := at.trader.GetPositions()
+	if err != nil {
+		log.Printf("  ⚠️ 获取持仓失败，无法为 %s 注册保护计划: %v", symbol, err)
+		return false
+	}
+
+	for _, raw := range positions {
+		rawSymbol, ok := raw["symbol"].(string)
+		if !ok || !strings.EqualFold(rawSymbol, symbol) {
+			continue
+		}
+
+		sideStr, ok := raw["side"].(string)
+		if !ok {
+			continue
+		}
+		entryPrice, ok := raw["entryPrice"].(float64)
+		if !ok || entryPrice <= 0 {
+			continue
+		}
+		positionAmt, ok := raw["positionAmt"].(float64)
+		if !ok {
+			continue
+		}
+		if positionAmt == 0 {
+			continue
+		}
+
+		side := strings.ToLower(sideStr)
+		if positionAmt < 0 {
+			positionAmt = -positionAmt
+		}
+
+		// 记录当前保护计划，并以入场价作为初始参考止损
+		at.registerProtectionPlan(symbol, side, entryPrice, plan, entryPrice)
+		return true
+	}
+	return false
+}
+
 func positionKey(symbol, side string) string {
 	return fmt.Sprintf("%s_%s", symbol, strings.ToLower(side))
 }
@@ -834,24 +880,43 @@ func (at *AutoTrader) executeDecisionWithRecord(decision *decision.Decision, act
 	case "close_short":
 		return at.executeCloseShortWithRecord(decision, actionRecord)
 	case "hold", "wait":
-		if decision.Protection != nil && at.mergeProtectionPlan(decision.Symbol, decision.Protection) {
+		if decision.Protection != nil {
 			exitMode := decision.Protection.ExitMode
 			if exitMode == "" {
 				exitMode = "trailing"
 			}
-			msg := fmt.Sprintf("  🛡 更新 %s 保护计划[%s]: hold≥%dmin, BE%.2f%%/%.2f%%, Trail %.2f%% @ %.2f%%",
-				decision.Symbol,
-				strings.ToUpper(exitMode),
-				decision.Protection.MinHoldMinutes,
-				decision.Protection.BreakEvenTriggerPct,
-				decision.Protection.BreakEvenOffsetPct,
-				decision.Protection.TrailDistancePct,
-				decision.Protection.TrailActivationPct,
-			)
-			if exitMode == "reversal" && decision.Protection.ReversalTriggerPct > 0 {
-				msg = fmt.Sprintf("%s, Reversal %.2f%%", msg, decision.Protection.ReversalTriggerPct)
+
+			if at.mergeProtectionPlan(decision.Symbol, decision.Protection) {
+				msg := fmt.Sprintf("  🛡 更新 %s 保护计划[%s]: hold≥%dmin, BE%.2f%%/%.2f%%, Trail %.2f%% @ %.2f%%",
+					decision.Symbol,
+					strings.ToUpper(exitMode),
+					decision.Protection.MinHoldMinutes,
+					decision.Protection.BreakEvenTriggerPct,
+					decision.Protection.BreakEvenOffsetPct,
+					decision.Protection.TrailDistancePct,
+					decision.Protection.TrailActivationPct,
+				)
+				if exitMode == "reversal" && decision.Protection.ReversalTriggerPct > 0 {
+					msg = fmt.Sprintf("%s, Reversal %.2f%%", msg, decision.Protection.ReversalTriggerPct)
+				}
+				log.Println(msg)
+			} else if at.registerProtectionForExistingPosition(decision.Symbol, decision.Protection) {
+				msg := fmt.Sprintf("  🛡 为 %s 初始化保护计划[%s]: hold≥%dmin, BE%.2f%%/%.2f%%, Trail %.2f%% @ %.2f%%",
+					decision.Symbol,
+					strings.ToUpper(exitMode),
+					decision.Protection.MinHoldMinutes,
+					decision.Protection.BreakEvenTriggerPct,
+					decision.Protection.BreakEvenOffsetPct,
+					decision.Protection.TrailDistancePct,
+					decision.Protection.TrailActivationPct,
+				)
+				if exitMode == "reversal" && decision.Protection.ReversalTriggerPct > 0 {
+					msg = fmt.Sprintf("%s, Reversal %.2f%%", msg, decision.Protection.ReversalTriggerPct)
+				}
+				log.Println(msg)
+			} else {
+				log.Printf("  ⚠️ 未找到 %s 的持仓，无法应用保护计划", decision.Symbol)
 			}
-			log.Println(msg)
 		}
 		return nil
 	default:
@@ -1096,6 +1161,11 @@ func (at *AutoTrader) GetAIModel() string {
 // GetDecisionLogger 获取决策日志记录器
 func (at *AutoTrader) GetDecisionLogger() *logger.DecisionLogger {
 	return at.decisionLogger
+}
+
+// GetInitialBalance 返回配置的初始余额
+func (at *AutoTrader) GetInitialBalance() float64 {
+	return at.initialBalance
 }
 
 // GetStatus 获取系统状态（用于API）

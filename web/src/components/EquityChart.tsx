@@ -17,8 +17,12 @@ import { t } from '../i18n/translations';
 interface EquityPoint {
   timestamp: string;
   total_equity: number;
-  pnl: number;
-  pnl_pct: number;
+  available_balance: number;
+  total_pnl: number;
+  total_pnl_pct: number;
+  position_count: number;
+  margin_used_pct: number;
+  initial_balance?: number;
   cycle_number: number;
 }
 
@@ -82,6 +86,7 @@ export function EquityChart({ traderId }: EquityChartProps) {
 
   // 计算初始余额（使用第一个数据点，如果无数据则从account获取，最后才用默认值）
   const initialBalance =
+    history[0]?.initial_balance ??
     history[0]?.total_equity ??
     account?.initial_balance ??
     account?.total_equity ??
@@ -89,8 +94,9 @@ export function EquityChart({ traderId }: EquityChartProps) {
 
   // 转换数据格式
   const chartData = displayHistory.map((point) => {
-    const pnl = point.total_equity - initialBalance;
-    const pnlPct = ((pnl / initialBalance) * 100).toFixed(2);
+    const base = point.initial_balance ?? initialBalance;
+    const pnl = point.total_equity - base;
+    const pnlPct = ((pnl / base) * 100).toFixed(2);
     return {
       time: new Date(point.timestamp).toLocaleTimeString('zh-CN', {
         hour: '2-digit',

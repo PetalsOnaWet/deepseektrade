@@ -24,6 +24,7 @@ type Data struct {
 	IntradaySeries    *IntradayData
 	LongerTermContext *LongerTermData
 	DailyContext      *DailyData
+	WeeklyContext     *WeeklyData
 	DerivedMetrics    *DerivedMetrics
 }
 
@@ -66,6 +67,16 @@ type DailyData struct {
 	CurrentVolume float64
 }
 
+// WeeklyData 周线级别数据
+type WeeklyData struct {
+	EMA20         float64
+	EMA50         float64
+	ATR14         float64
+	CloseSeries   []float64
+	MACDValues    []float64
+	RSI14Values   []float64
+}
+
 // DerivedMetrics 预计算的趋势指标
 type DerivedMetrics struct {
 	PriceVsEMA20Pct float64
@@ -77,6 +88,9 @@ type DerivedMetrics struct {
 	DailyTrend      string
 	DailyPriceVsEMA float64
 	DailyEMA20Slope float64
+	WeeklyTrend     string
+	WeeklyPriceVsEMA float64
+	WeeklyEMA20Slope float64
 }
 
 // Kline K线数据
@@ -107,10 +121,16 @@ func Get(symbol string) (*Data, error) {
 		return nil, fmt.Errorf("获取4小时K线失败: %v", err)
 	}
 
-	// 获取日线K线数据 (最近60个)
+	// 获取日线K线数据 (最近90个)
 	klines1d, err := getKlines(symbol, "1d", 90)
 	if err != nil {
 		return nil, fmt.Errorf("获取日线K线失败: %v", err)
+	}
+
+	// 获取周线K线数据 (最近90个)
+	klines1w, err := getKlines(symbol, "1w", 90)
+	if err != nil {
+		return nil, fmt.Errorf("获取周线K线失败: %v", err)
 	}
 
 	// 计算当前指标 (基于3分钟最新数据)
@@ -157,8 +177,11 @@ func Get(symbol string) (*Data, error) {
 	// 计算日线数据
 	dailyData := calculateDailyData(klines1d)
 
+	// 计算周线数据
+	weeklyData := calculateWeeklyData(klines1w)
+
 	// 派生趋势指标
-	derivedMetrics := calculateDerivedMetrics(currentPrice, currentEMA20, intradayData, longerTermData, dailyData)
+	derivedMetrics := calculateDerivedMetrics(currentPrice, currentEMA20, intradayData, longerTermData, dailyData, weeklyData)
 
 	return &Data{
 		Symbol:            symbol,
@@ -173,6 +196,7 @@ func Get(symbol string) (*Data, error) {
 		IntradaySeries:    intradayData,
 		LongerTermContext: longerTermData,
 		DailyContext:      dailyData,
+		WeeklyContext:     weeklyData,
 		DerivedMetrics:    derivedMetrics,
 	}, nil
 }
@@ -473,7 +497,45 @@ func calculateDailyData(klines []Kline) *DailyData {
 	return data
 }
 
-func calculateDerivedMetrics(currentPrice, currentEMA float64, intraday *IntradayData, longer *LongerTermData, daily *DailyData) *DerivedMetrics {
+func calculateWeeklyData(klines []Kline) *WeeklyData {
+	if len(klines) == 0 {
+		return nil
+	}
+
+	data := &WeeklyData{
+		MACDValues:  make([]float64, 0, 10),
+		RSI14Values: make([]float64, 0, 10),
+		CloseSeries: make([]float64, 0, len(klines)),
+	}
+
+	for _, k := range klines {
+		data.CloseSeries = append(data.CloseSeries, k.Close)
+	}
+
+	data.EMA20 = calculateEMA(klines, 20)
+	data.EMA50 = calculateEMA(klines, 50)
+	data.ATR14 = calculateATR(klines, 14)
+
+	start := len(klines) - 10
+	if start < 0 {
+		start = 0
+	}
+
+	for i := start; i < len(klines); i++ {
+		if i >= 25 {
+			macd := calculateMACD(klines[:i+1])
+			data.MACDValues = append(data.MACDValues, macd)
+		}
+		if i >= 14 {
+			rsi := calculateRSI(klines[:i+1], 14)
+			data.RSI14Values = append(data.RSI14Values, rsi)
+		}
+	}
+
+	return data
+}
+
+func calculateDerivedMetrics(currentPrice, currentEMA float64, intraday *IntradayData, longer *LongerTermData, daily *DailyData, weekly *WeeklyData) *DerivedMetrics {
 	if intraday == nil {
 		return nil
 	}
@@ -548,6 +610,33 @@ func calculateDerivedMetrics(currentPrice, currentEMA float64, intraday *Intrada
 			last := daily.CloseSeries[len(daily.CloseSeries)-1]
 			if first != 0 {
 				metrics.DailyEMA20Slope = (last - first) / first * 100
+			}
+		}
+	}
+
+	if weekly != nil {
+		if weekly.EMA20 > 0 {
+			metrics.WeeklyPriceVsEMA = ((currentPrice - weekly.EMA20) / weekly.EMA20) * 100
+		}
+		if len(weekly.MACDValues) >= 2 {
+			last := weekly.MACDValues[len(weekly.MACDValues)-1]
+			prev := weekly.MACDValues[len(weekly.MACDValues)-2]
+			switch {
+			case last > 0 && last >= prev:
+				metrics.WeeklyTrend = "bullish"
+			case last < 0 && last <= prev:
+				metrics.WeeklyTrend = "bearish"
+			default:
+				metrics.WeeklyTrend = "neutral"
+			}
+		} else {
+			metrics.WeeklyTrend = "neutral"
+		}
+		if len(weekly.CloseSeries) >= 20 {
+			first := weekly.CloseSeries[len(weekly.CloseSeries)-20]
+			last := weekly.CloseSeries[len(weekly.CloseSeries)-1]
+			if first != 0 {
+				metrics.WeeklyEMA20Slope = (last - first) / first * 100
 			}
 		}
 	}
@@ -664,7 +753,7 @@ func Format(data *Data) string {
 
 	if data.DerivedMetrics != nil {
 		sb.WriteString("Derived trend metrics:\n\n")
-		sb.WriteString(fmt.Sprintf("price_vs_ema20_pct = %.3f, ema20_slope = %.3f, macd_slope = %.3f, rsi7_slope = %.3f, volatility_ratio = %.3f, htf_trend = %s, daily_trend = %s, daily_price_vs_ema20_pct = %.3f, daily_ema20_slope = %.3f\n\n",
+		sb.WriteString(fmt.Sprintf("price_vs_ema20_pct = %.3f, ema20_slope = %.3f, macd_slope = %.3f, rsi7_slope = %.3f, volatility_ratio = %.3f, htf_trend = %s, daily_trend = %s, daily_price_vs_ema20_pct = %.3f, daily_ema20_slope = %.3f, weekly_trend = %s, weekly_price_vs_ema20_pct = %.3f, weekly_ema20_slope = %.3f\n\n",
 			data.DerivedMetrics.PriceVsEMA20Pct,
 			data.DerivedMetrics.EMA20Slope,
 			data.DerivedMetrics.MACDSlope,
@@ -674,6 +763,9 @@ func Format(data *Data) string {
 			data.DerivedMetrics.DailyTrend,
 			data.DerivedMetrics.DailyPriceVsEMA,
 			data.DerivedMetrics.DailyEMA20Slope,
+			data.DerivedMetrics.WeeklyTrend,
+			data.DerivedMetrics.WeeklyPriceVsEMA,
+			data.DerivedMetrics.WeeklyEMA20Slope,
 		))
 	}
 
@@ -712,6 +804,25 @@ func Format(data *Data) string {
 			"rsi14_mult": truncateSlice(data.DailyContext.RSI14Values, 6),
 		}
 		if jsonBlob, err := json.MarshalIndent(dailySummary, "", "  "); err == nil {
+			sb.WriteString("```json\n")
+			sb.WriteString(string(jsonBlob))
+			sb.WriteString("\n```\n\n")
+		}
+	}
+
+	if data.WeeklyContext != nil {
+		sb.WriteString("Weekly context (1‑week timeframe):\n\n")
+		sb.WriteString(fmt.Sprintf("20‑Period EMA: %.3f vs. 50‑Period EMA: %.3f\n\n", data.WeeklyContext.EMA20, data.WeeklyContext.EMA50))
+		sb.WriteString(fmt.Sprintf("14‑Period ATR: %.3f\n\n", data.WeeklyContext.ATR14))
+
+		weeklySummary := map[string]interface{}{
+			"ema20":     data.WeeklyContext.EMA20,
+			"ema50":     data.WeeklyContext.EMA50,
+			"atr14":     data.WeeklyContext.ATR14,
+			"macd_mult": truncateSlice(data.WeeklyContext.MACDValues, 6),
+			"rsi14_mult": truncateSlice(data.WeeklyContext.RSI14Values, 6),
+		}
+		if jsonBlob, err := json.MarshalIndent(weeklySummary, "", "  "); err == nil {
 			sb.WriteString("```json\n")
 			sb.WriteString(string(jsonBlob))
 			sb.WriteString("\n```\n\n")
