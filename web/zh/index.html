@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>加密货币 AI 交易直播</title>
+    <meta
+      name="description"
+      content="加密货币 AI 交易直播，展示 DeepSeek 驱动的真实币安实盘，实时盈亏、风险控制与策略执行一目了然。"
+    />
+    <link rel="canonical" href="https://trade.ylaff.com/zh/" />
+    <link rel="alternate" hreflang="en" href="https://trade.ylaff.com/" />
+    <link rel="alternate" hreflang="zh-CN" href="https://trade.ylaff.com/zh/" />
+    <link rel="alternate" hreflang="x-default" href="https://trade.ylaff.com/" />
+    <script
+      type="text/javascript"
+      src="https://platform-api.sharethis.com/js/sharethis.js#property=69036d93ce07b9504bc4e427&product=sop"
+      async="async"
+    ></script>
+    <!-- Google tag (gtag.js) -->
+    <script async src="https://www.googletagmanager.com/gtag/js?id=G-WS4ZD23CT7"></script>
+    <script>
+      window.dataLayer = window.dataLayer || [];
+      function gtag() {
+        dataLayer.push(arguments);
+      }
+      gtag('js', new Date());
+      gtag('config', 'G-WS4ZD23CT7');
+    </script>
+    <script>
+      window.__DEFAULT_LANG__ = 'zh';
+    </script>
+    <style>
+      .seo-summary {
+        max-width: 960px;
+        margin: 2rem auto 3rem;
+        padding: 1.5rem;
+        background: #f5f7fb;
+        border-radius: 16px;
+        box-shadow: 0 20px 45px rgba(15, 23, 42, 0.12);
+        font-family: 'PingFang SC', 'Microsoft YaHei', 'Inter', sans-serif;
+        color: #0b1220;
+        line-height: 1.8;
+      }
+      .seo-summary h1 {
+        font-size: 2rem;
+        margin-bottom: 1rem;
+        color: #0b0e11;
+        text-align: center;
+      }
+      .seo-summary h2 {
+        margin-top: 1.8rem;
+        font-size: 1.35rem;
+        color: #0b0e11;
+      }
+      .seo-summary p,
+      .seo-summary ul {
+        margin-top: 0.8rem;
+      }
+      .seo-summary ul {
+        padding-left: 1.2rem;
+      }
+      .seo-summary ul li {
+        margin-bottom: 0.4rem;
+      }
+      .seo-summary .tagline {
+        display: inline-block;
+        margin-bottom: 1rem;
+        padding: 0.25rem 0.75rem;
+        background: #0ecb81;
+        color: #06201d;
+        border-radius: 999px;
+        font-weight: 600;
+        font-size: 0.85rem;
+      }
+    </style>
+  </head>
+  <body>
+    <section class="seo-summary">
+      <span class="tagline">加密货币 AI 实盘直播</span>
+      <h1>加密货币 AI 交易直播</h1>
+      <p>
+        本系统实时展示一个币安 USDT 永续合约账户（当前权益 20&nbsp;USDT）。所有决策由 DeepSeek
+        推理模型全权负责。AI 每 3 分钟获取最新行情、仓位与风险数据，输出结构化指令，
+        由执行引擎下单并记录日志，所有盈亏、日志与策略反思均同步在这里。
+      </p>
+      <h2>系统能做什么？</h2>
+      <ul>
+        <li>直连币安合约账户，实时拉取余额、仓位与实际盈亏。</li>
+        <li>展示 AI 的思维链、风控计划和每一笔执行记录。</li>
+        <li>提供 ShareThis 分享按钮，方便输出直播战报。</li>
+        <li>通过多周期信号筛选（3 分钟 / 4 小时 / 日线 / 周线）识别趋势机会。</li>
+      </ul>
+      <h2>是真实实盘吗？</h2>
+      <p>
+        是的。API Key 指向真实币安合约子账户，所有仓位、保证金、已实现盈亏均来自币安官方接口。
+        这不是模拟盘或历史回放，而是全天候实时交易。
+      </p>
+      <h2>使用什么模型？</h2>
+      <p>
+        决策核心是 DeepSeek 推理模型。系统对返回的 JSON 做严格校验：杠杆上限 10×、
+        单笔风险不超过净值的 3%，必须包含完整的保护计划，否则会拒绝执行。
+      </p>
+      <h2>核心策略</h2>
+      <ul>
+        <li>趋势跟随：多周期共振才考虑开仓，弱趋势时宁可观望。</li>
+        <li>两段式风控：行情获利 3%（未放大杠杆）后，将止损抬到保本位置。</li>
+        <li>动态追踪：再扩张 1.5%~2% 后，启动 0.8%~1.5% 的波动率自适应追踪止损。</li>
+        <li>风险敞口限制：最多持有 3 个品种，总风险敞口不超过净值的 3%。</li>
+      </ul>
+    </section>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
