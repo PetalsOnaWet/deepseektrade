@@ -24,6 +24,15 @@ function App() {
       setLanguage('en');
     }
   }, [setLanguage]);
+  const switchLanguage = (lang: Language) => {
+    if (lang === language) return;
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('language', lang);
+      window.location.href = lang === 'zh' ? '/zh/' : '/';
+    } else {
+      setLanguage(lang);
+    }
+  };
   const [selectedTraderId, setSelectedTraderId] = useState<string | undefined>();
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [lastUpdate, setLastUpdate] = useState<string>('--:--:--');
@@ -188,7 +197,7 @@ function App() {
               </a>
               <div className="flex gap-1 rounded p-1" style={{ background: '#1E2329' }}>
                 <button
-                  onClick={() => setLanguage('zh')}
+                  onClick={() => switchLanguage('zh')}
                   className="px-3 py-1.5 rounded text-xs font-semibold transition-all"
                   style={language === 'zh'
                     ? { background: '#F0B90B', color: '#000' }
@@ -198,7 +207,7 @@ function App() {
                   中文
                 </button>
                 <button
-                  onClick={() => setLanguage('en')}
+                  onClick={() => switchLanguage('en')}
                   className="px-3 py-1.5 rounded text-xs font-semibold transition-all"
                   style={language === 'en'
                     ? { background: '#F0B90B', color: '#000' }
@@ -250,7 +259,7 @@ function App() {
 
                 <div className="flex gap-1 rounded p-1" style={{ background: '#0B0E11', border: '1px solid #2B3139' }}>
                   <button
-                    onClick={() => setLanguage('zh')}
+                    onClick={() => switchLanguage('zh')}
                     className="flex-1 px-3 py-1.5 rounded text-xs font-semibold transition-all"
                     style={language === 'zh'
                       ? { background: '#F0B90B', color: '#000' }
@@ -260,7 +269,7 @@ function App() {
                     中文
                   </button>
                   <button
-                    onClick={() => setLanguage('en')}
+                    onClick={() => switchLanguage('en')}
                     className="flex-1 px-3 py-1.5 rounded text-xs font-semibold transition-all"
                     style={language === 'en'
                       ? { background: '#F0B90B', color: '#000' }
@@ -672,6 +681,8 @@ function TraderDetailsPage({
         {/* 右侧结束 */}
       </div>
 
+      <SeoSection language={language} />
+
       {/* AI Learning & Performance Analysis */}
       <div className="mb-6 animate-slide-in" style={{ animationDelay: '0.3s' }}>
         <AILearning traderId={selectedTrader.trader_id} />
@@ -838,6 +849,139 @@ function DecisionCard({ decision, language }: { decision: DecisionRecord; langua
         </div>
       )}
     </div>
+  );
+}
+
+function SeoSection({ language }: { language: Language }) {
+  const isZh = language === 'zh';
+  const containerStyle: React.CSSProperties = {
+    maxWidth: '960px',
+    margin: '2rem auto 3rem',
+    padding: '1.6rem 1.8rem 2rem',
+    background: '#0f172a',
+    border: '1px solid #1f2937',
+    borderRadius: '18px',
+    lineHeight: 1.7,
+    color: '#e5e7eb',
+    boxShadow: '0 24px 40px rgba(15, 23, 42, 0.28)',
+  };
+  const headingStyle: React.CSSProperties = {
+    marginTop: '1.4rem',
+    fontSize: '1.25rem',
+    color: '#f8fafc',
+  };
+  const listStyle: React.CSSProperties = {
+    paddingLeft: '1.2rem',
+    marginTop: '0.7rem',
+  };
+  const taglineStyle: React.CSSProperties = {
+    display: 'inline-block',
+    padding: '0.25rem 0.75rem',
+    borderRadius: '999px',
+    background: 'rgba(14, 203, 129, 0.15)',
+    color: '#22d3a3',
+    fontWeight: 600,
+    fontSize: '0.8rem',
+    marginBottom: '0.9rem',
+  };
+
+  const content = isZh
+    ? [
+        {
+          title: '关于加密货币 AI 交易直播',
+          body: [
+            '本系统实时展示一个币安 USDT 永续合约账户（当前权益 20 USDT）。所有决策由 DeepSeek 推理模型全权负责。AI 每 3 分钟收集行情、仓位和风险数据，输出结构化交易指令，由执行引擎下单并记录日志，盈亏与策略反思都会第一时间呈现。',
+          ],
+        },
+        {
+          title: '系统能做什么？',
+          list: [
+            '直连币安合约账户，实时拉取余额、仓位与实际盈亏。',
+            '展示 AI 的思维链、保护计划与每笔执行日志。',
+            '通过 ShareThis 快速生成社交媒体分享链接。',
+            '多周期筛选（3 分钟 / 4 小时 / 日线 / 周线）识别趋势机会。',
+          ],
+        },
+        {
+          title: '是真实实盘吗？',
+          body: [
+            '完全是实盘。API Key 指向真实的币安永续子账户，所有仓位、保证金和已实现盈亏均来自币安官方接口，没有模拟盘或历史回放。',
+          ],
+        },
+        {
+          title: '使用什么模型？',
+          body: [
+            '交易策略由 DeepSeek 推理模型驱动。系统对其输出做严格校验：杠杆上限 10×，单笔风险必须低于净值的 3%，并要求提供完整的风控计划，否则指令会被拒绝执行。',
+          ],
+        },
+        {
+          title: '核心策略',
+          list: [
+            '趋势跟随：多周期共振才开仓，弱趋势时宁可观望。',
+            '两段式风控：行情获利 3%（未放大杠杆）后，将止损抬到保本位置。',
+            '动态追踪：再扩张 1.5%~2% 后，启用 0.8%~1.5% 的波动率自适应追踪止损，并随盈利阶梯收紧。',
+            '风险敞口限制：最多持有 3 个品种，总风险敞口不超过净值的 3%。',
+          ],
+        },
+      ]
+    : [
+        {
+          title: 'About Crypto AI Trading Live',
+          body: [
+            'Crypto AI Trading Live streams a live Binance USDT-margined futures account (current equity 20 USDT). The execution loop is fully autonomous and powered by the DeepSeek reasoning model. Every three minutes the AI evaluates market data, open risk, and positions, then emits structured trade instructions. Executions, P&L, and reflection logs are published here in real time.',
+          ],
+        },
+        {
+          title: 'What the system does',
+          list: [
+            'Connects directly to Binance perpetual futures via API.',
+            'Streams live equity, margin usage, and open positions.',
+            'Visualises AI chain-of-thought, protection plans, and every execution record.',
+            'Generates share-ready social cards through ShareThis.',
+          ],
+        },
+        {
+          title: 'Is it real trading?',
+          body: [
+            'Yes. Orders are signed with a live Binance futures API key. Balance, realised P&L, and position data are fetched from Binance every cycle. There is no paper trading or replayed feed.',
+          ],
+        },
+        {
+          title: 'Which model is driving the trades?',
+          body: [
+            'Decisions come from the DeepSeek reasoning model. Outputs are validated locally: leverage is capped at 10×, per-trade risk stays under 3% of equity, and each JSON response must include a complete protection plan.',
+          ],
+        },
+        {
+          title: 'Core strategy',
+          list: [
+            'Trend-following bias guided by 3 minute, 4 hour, daily, and weekly structure.',
+            'Two-stage risk control: once price advances 3% in favour, the stop moves to breakeven (with a small buffer).',
+            'Volatility-aware trailing stops kick in after another 1.5–2% move, tightening from 1.5% toward 0.8% as profits grow.',
+            'Risk capping: at most three concurrent symbols with exposure limited to 3% of equity per trade.',
+          ],
+        },
+      ];
+
+  return (
+    <section style={containerStyle}>
+      <span style={taglineStyle}>{isZh ? '加密货币 AI 实盘直播' : 'Live crypto AI trading dashboard'}</span>
+      {content.map((section) => (
+        <div key={section.title}>
+          <h2 style={headingStyle}>{section.title}</h2>
+          {section.body?.map((paragraph, idx) => (
+            <p key={idx}>{paragraph}</p>
+          ))}
+          {section.list && (
+            <ul style={listStyle}>
+              {section.list.map((item, idx) => (
+                <li key={idx}>{item}</li>
+              ))}
+            </ul>
+          )}
+        </div>
+      ))}
+    </section>
   );
 }
 
