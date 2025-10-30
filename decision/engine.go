@@ -556,8 +556,12 @@ func validateDecision(d *Decision, accountEquity float64, btcEthLeverage, altcoi
 			maxPositionValue = accountEquity * 10 // BTC/ETH最多10倍账户净值
 		}
 
-		if d.Leverage <= 0 || d.Leverage > maxLeverage {
+		if d.Leverage <= 0 {
 			return fmt.Errorf("杠杆必须在1-%d之间（%s，当前配置上限%d倍）: %d", maxLeverage, d.Symbol, maxLeverage, d.Leverage)
+		}
+		if d.Leverage > maxLeverage {
+			log.Printf("⚠️  杠杆超出上限，已将 %s 的杠杆从 %dx 调整为配置上限 %dx", d.Symbol, d.Leverage, maxLeverage)
+			d.Leverage = maxLeverage
 		}
 		if d.PositionSizeUSD <= 0 {
 			return fmt.Errorf("仓位大小必须大于0: %.2f", d.PositionSizeUSD)
