@@ -3,8 +3,8 @@ export type Language = 'en' | 'zh';
 export const translations = {
   en: {
     // Header
-    appTitle: 'Binance DeepSeek Trend Trading Assistant',
-    subtitle: 'Trend-following AI dashboard with live risk controls',
+    appTitle: 'Crypto AI Trading Live',
+    subtitle: 'Autonomous crypto trading desk with live P&L streaming',
     competition: 'Competition',
     details: 'Details',
     running: 'RUNNING',
@@ -132,8 +132,8 @@ export const translations = {
   },
   zh: {
     // Header
-    appTitle: '币安 DeepSeek 趋势开单系统',
-    subtitle: '趋势跟随 AI 面板 · 实时风控与仓位洞察',
+    appTitle: '加密货币 AI 交易直播',
+    subtitle: '自主演化 AI 的加密实盘交易面板，实时盈亏播报',
     competition: '竞赛',
     details: '详情',
     running: '运行中',
