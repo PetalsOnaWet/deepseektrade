@@ -25,7 +25,7 @@ RUN wget http://prdownloads.sourceforge.net/ta-lib/ta-lib-0.4.0-src.tar.gz && \
         cp "$CONFIG_SUB" config.sub && \
         chmod +x config.guess config.sub; \
     fi && \
-    ./configure --prefix=/usr && \
+    ./configure --prefix=/usr --build=$(uname -m)-unknown-linux-gnu && \
     make && \
     make install && \
     cd .. && \
@@ -44,7 +44,7 @@ RUN go mod download
 COPY . .
 
 # Build the application
-RUN CGO_ENABLED=1 GOOS=linux go build -a -installsuffix cgo -o nofx .
+RUN CGO_ENABLED=1 GOOS=linux go build -p 1 -o nofx .
 
 # Frontend build stage
 FROM node:18-alpine AS frontend-builder
@@ -91,7 +91,7 @@ RUN wget http://prdownloads.sourceforge.net/ta-lib/ta-lib-0.4.0-src.tar.gz && \
         cp "$CONFIG_SUB" config.sub && \
         chmod +x config.guess config.sub; \
     fi && \
-    ./configure --prefix=/usr && \
+    ./configure --prefix=/usr --build=$(uname -m)-unknown-linux-gnu && \
     make && \
     make install && \
     cd .. && \

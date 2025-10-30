@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"nofx/logger"
 	"nofx/manager"
 
 	"github.com/gin-gonic/gin"
@@ -391,10 +392,11 @@ func (s *Server) handlePerformance(c *gin.Context) {
 	// 分析最近20个周期的交易表现
 	performance, err := trader.GetDecisionLogger().AnalyzePerformance(20)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"error": fmt.Sprintf("分析历史表现失败: %v", err),
-		})
-		return
+		log.Printf("⚠️  分析历史表现失败，返回默认数据: %v", err)
+		performance = &logger.PerformanceAnalysis{
+			RecentTrades: []logger.TradeOutcome{},
+			SymbolStats:  make(map[string]*logger.SymbolPerformance),
+		}
 	}
 
 	c.JSON(http.StatusOK, performance)

@@ -3,12 +3,16 @@ export type Language = 'en' | 'zh';
 export const translations = {
   en: {
     // Header
-    appTitle: 'AI Trading Competition',
-    subtitle: 'Qwen vs DeepSeek · Real-time',
+    appTitle: 'Binance DeepSeek Trend Trading Assistant',
+    subtitle: 'Trend-following AI dashboard with live risk controls',
     competition: 'Competition',
     details: 'Details',
     running: 'RUNNING',
     stopped: 'STOPPED',
+    referralSpotTitle: '20% Off Spot & Futures Fees',
+    referralSpotSubtitle: 'Use invite BTCB888 · Instant rebates',
+    referralWalletTitle: '10% Back on Binance Web3 Wallet',
+    referralWalletSubtitle: 'Activate with BTCB888 and save on fees',
 
     // Footer
     footerTitle: 'NOFX - AI Trading Competition System',
@@ -121,12 +125,16 @@ export const translations = {
   },
   zh: {
     // Header
-    appTitle: 'AI交易竞赛',
-    subtitle: 'Qwen vs DeepSeek · 实时',
+    appTitle: '币安 DeepSeek 趋势开单系统',
+    subtitle: '趋势跟随 AI 面板 · 实时风控与仓位洞察',
     competition: '竞赛',
     details: '详情',
     running: '运行中',
     stopped: '已停止',
+    referralSpotTitle: '现货合约 20% 返佣',
+    referralSpotSubtitle: '邀请码 BTCB888 · 手续费立减',
+    referralWalletTitle: '币安钱包 10% 返还',
+    referralWalletSubtitle: '使用 BTCB888 解锁专属福利',
 
     // Footer
     footerTitle: 'NOFX - AI交易竞赛系统',

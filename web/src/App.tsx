@@ -2,7 +2,6 @@ import { useEffect, useState } from 'react';
 import useSWR from 'swr';
 import { api } from './lib/api';
 import { EquityChart } from './components/EquityChart';
-import { CompetitionPage } from './components/CompetitionPage';
 import AILearning from './components/AILearning';
 import { LanguageProvider, useLanguage } from './contexts/LanguageContext';
 import { t, type Language } from './i18n/translations';
@@ -15,11 +14,8 @@ import type {
   TraderInfo,
 } from './types';
 
-type Page = 'competition' | 'trader';
-
 function App() {
   const { language, setLanguage } = useLanguage();
-  const [currentPage, setCurrentPage] = useState<Page>('competition');
   const [selectedTraderId, setSelectedTraderId] = useState<string | undefined>();
   const [lastUpdate, setLastUpdate] = useState<string>('--:--:--');
 
@@ -37,9 +33,7 @@ function App() {
 
   // 如果在trader页面，获取该trader的数据
   const { data: status } = useSWR<SystemStatus>(
-    currentPage === 'trader' && selectedTraderId
-      ? `status-${selectedTraderId}`
-      : null,
+    selectedTraderId ? `status-${selectedTraderId}` : null,
     () => api.getStatus(selectedTraderId),
     {
       refreshInterval: 5000,
@@ -49,9 +43,7 @@ function App() {
   );
 
   const { data: account } = useSWR<AccountInfo>(
-    currentPage === 'trader' && selectedTraderId
-      ? `account-${selectedTraderId}`
-      : null,
+    selectedTraderId ? `account-${selectedTraderId}` : null,
     () => api.getAccount(selectedTraderId),
     {
       refreshInterval: 5000,
@@ -61,9 +53,7 @@ function App() {
   );
 
   const { data: positions } = useSWR<Position[]>(
-    currentPage === 'trader' && selectedTraderId
-      ? `positions-${selectedTraderId}`
-      : null,
+    selectedTraderId ? `positions-${selectedTraderId}` : null,
     () => api.getPositions(selectedTraderId),
     {
       refreshInterval: 5000,
@@ -73,17 +63,13 @@ function App() {
   );
 
   const { data: decisions } = useSWR<DecisionRecord[]>(
-    currentPage === 'trader' && selectedTraderId
-      ? `decisions/latest-${selectedTraderId}`
-      : null,
+    selectedTraderId ? `decisions/latest-${selectedTraderId}` : null,
     () => api.getLatestDecisions(selectedTraderId),
     { refreshInterval: 10000 }
   );
 
   const { data: stats } = useSWR<Statistics>(
-    currentPage === 'trader' && selectedTraderId
-      ? `statistics-${selectedTraderId}`
-      : null,
+    selectedTraderId ? `statistics-${selectedTraderId}` : null,
     () => api.getStatistics(selectedTraderId),
     { refreshInterval: 10000 }
   );
@@ -96,15 +82,29 @@ function App() {
   }, [account]);
 
   const selectedTrader = traders?.find((t) => t.trader_id === selectedTraderId);
+  const referralItems = [
+    {
+      href: 'https://www.maxweb.red/join?ref=BTCB888',
+      title: t('referralSpotTitle', language),
+      subtitle: t('referralSpotSubtitle', language),
+      emoji: '🚀',
+    },
+    {
+      href: 'https://web3.binance.com/referral?ref=BTCB888',
+      title: t('referralWalletTitle', language),
+      subtitle: t('referralWalletSubtitle', language),
+      emoji: '💎',
+    },
+  ];
 
   return (
     <div className="min-h-screen" style={{ background: '#0B0E11', color: '#EAECEF' }}>
       {/* Header - Binance Style */}
       <header className="glass sticky top-0 z-50 backdrop-blur-xl">
-        <div className="max-w-[1920px] mx-auto px-6 py-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <div className="w-8 h-8 rounded-full flex items-center justify-center text-xl" style={{ background: 'linear-gradient(135deg, #F0B90B 0%, #FCD535 100%)' }}>
+        <div className="max-w-[1920px] mx-auto px-4 sm:px-6 py-4">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+            <div className="flex items-start gap-3 sm:items-center">
+              <div className="w-8 h-8 rounded-full flex items-center justify-center text-xl shrink-0" style={{ background: 'linear-gradient(135deg, #F0B90B 0%, #FCD535 100%)' }}>
                 ⚡
               </div>
               <div>
@@ -116,136 +116,127 @@ function App() {
                 </p>
               </div>
             </div>
-            <div className="flex items-center gap-3">
-              {/* GitHub Link */}
-              <a
-                href="https://github.com/tinkle-community/nofx"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="flex items-center gap-2 px-3 py-2 rounded text-sm font-semibold transition-all hover:scale-105"
-                style={{ background: '#1E2329', color: '#848E9C', border: '1px solid #2B3139' }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.background = '#2B3139';
-                  e.currentTarget.style.color = '#EAECEF';
-                  e.currentTarget.style.borderColor = '#F0B90B';
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.background = '#1E2329';
-                  e.currentTarget.style.color = '#848E9C';
-                  e.currentTarget.style.borderColor = '#2B3139';
-                }}
-              >
-                <svg width="20" height="20" viewBox="0 0 16 16" fill="currentColor">
-                  <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/>
-                </svg>
-                <span>GitHub</span>
-              </a>
-
-              {/* Language Toggle */}
-              <div className="flex gap-1 rounded p-1" style={{ background: '#1E2329' }}>
-                <button
-                  onClick={() => setLanguage('zh')}
-                  className="px-3 py-1.5 rounded text-xs font-semibold transition-all"
-                  style={language === 'zh'
-                    ? { background: '#F0B90B', color: '#000' }
-                    : { background: 'transparent', color: '#848E9C' }
-                  }
-                >
-                  中文
-                </button>
-                <button
-                  onClick={() => setLanguage('en')}
-                  className="px-3 py-1.5 rounded text-xs font-semibold transition-all"
-                  style={language === 'en'
-                    ? { background: '#F0B90B', color: '#000' }
-                    : { background: 'transparent', color: '#848E9C' }
-                  }
-                >
-                  EN
-                </button>
+            <div className="flex flex-col gap-3 w-full lg:w-auto">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 w-full">
+                {referralItems.map((item) => (
+                  <a
+                    key={item.href}
+                    href={item.href}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex flex-col px-3 py-2 rounded-lg transition-all duration-200 hover:-translate-y-0.5"
+                    style={{
+                      background: 'linear-gradient(135deg, rgba(240, 185, 11, 0.15) 0%, rgba(252, 213, 53, 0.05) 100%)',
+                      border: '1px solid rgba(240, 185, 11, 0.35)',
+                      boxShadow: '0 6px 18px rgba(240, 185, 11, 0.18)',
+                    }}
+                  >
+                    <span className="text-xs font-semibold flex items-center gap-1" style={{ color: '#F0B90B' }}>
+                      <span>{item.emoji}</span>
+                      {item.title}
+                    </span>
+                    <span className="text-[11px] mt-1 leading-snug" style={{ color: '#EAECEF' }}>
+                      {item.subtitle}
+                    </span>
+                  </a>
+                ))}
               </div>
-
-              {/* Page Toggle */}
-              <div className="flex gap-1 rounded p-1" style={{ background: '#1E2329' }}>
-                <button
-                  onClick={() => setCurrentPage('competition')}
-                  className={`px-4 py-2 rounded text-sm font-semibold transition-all ${
-                    currentPage === 'competition' ? '' : ''
-                  }`}
-                  style={currentPage === 'competition'
-                    ? { background: '#F0B90B', color: '#000' }
-                    : { background: 'transparent', color: '#848E9C' }
-                  }
+              <div className="flex flex-wrap items-center gap-3 justify-between sm:justify-end">
+                <a
+                  href="https://github.com/tinkle-community/nofx"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center gap-2 px-3 py-2 rounded text-sm font-semibold transition-all hover:scale-105 w-full sm:w-auto justify-center"
+                  style={{ background: '#1E2329', color: '#848E9C', border: '1px solid #2B3139' }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.background = '#2B3139';
+                    e.currentTarget.style.color = '#EAECEF';
+                    e.currentTarget.style.borderColor = '#F0B90B';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.background = '#1E2329';
+                    e.currentTarget.style.color = '#848E9C';
+                    e.currentTarget.style.borderColor = '#2B3139';
+                  }}
                 >
-                  {t('competition', language)}
-                </button>
-                <button
-                  onClick={() => setCurrentPage('trader')}
-                  className={`px-4 py-2 rounded text-sm font-semibold transition-all`}
-                  style={currentPage === 'trader'
-                    ? { background: '#F0B90B', color: '#000' }
-                    : { background: 'transparent', color: '#848E9C' }
-                  }
-                >
-                  {t('details', language)}
-                </button>
-              </div>
-
-              {/* Trader Selector (only show on trader page) */}
-              {currentPage === 'trader' && traders && traders.length > 0 && (
-                <select
-                  value={selectedTraderId}
-                  onChange={(e) => setSelectedTraderId(e.target.value)}
-                  className="rounded px-3 py-2 text-sm font-medium cursor-pointer transition-colors"
-                  style={{ background: '#1E2329', border: '1px solid #2B3139', color: '#EAECEF' }}
-                >
-                  {traders.map((trader) => (
-                    <option key={trader.trader_id} value={trader.trader_id}>
-                      {trader.trader_name} ({trader.ai_model.toUpperCase()})
-                    </option>
-                  ))}
-                </select>
-              )}
-
-              {/* Status Indicator (only show on trader page) */}
-              {currentPage === 'trader' && status && (
-                <div
-                  className="flex items-center gap-2 px-3 py-2 rounded"
-                  style={status.is_running
-                    ? { background: 'rgba(14, 203, 129, 0.1)', color: '#0ECB81', border: '1px solid rgba(14, 203, 129, 0.2)' }
-                    : { background: 'rgba(246, 70, 93, 0.1)', color: '#F6465D', border: '1px solid rgba(246, 70, 93, 0.2)' }
-                  }
-                >
-                  <div
-                    className={`w-2 h-2 rounded-full ${status.is_running ? 'pulse-glow' : ''}`}
-                    style={{ background: status.is_running ? '#0ECB81' : '#F6465D' }}
-                  />
-                  <span className="font-semibold mono text-xs">
-                    {t(status.is_running ? 'running' : 'stopped', language)}
-                  </span>
+                  <svg width="20" height="20" viewBox="0 0 16 16" fill="currentColor">
+                    <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/>
+                  </svg>
+                  <span>GitHub</span>
+                </a>
+                <div className="flex gap-1 rounded p-1 w-full sm:w-auto justify-center sm:justify-start" style={{ background: '#1E2329' }}>
+                  <button
+                    onClick={() => setLanguage('zh')}
+                    className="px-3 py-1.5 rounded text-xs font-semibold transition-all"
+                    style={language === 'zh'
+                      ? { background: '#F0B90B', color: '#000' }
+                      : { background: 'transparent', color: '#848E9C' }
+                    }
+                  >
+                    中文
+                  </button>
+                  <button
+                    onClick={() => setLanguage('en')}
+                    className="px-3 py-1.5 rounded text-xs font-semibold transition-all"
+                    style={language === 'en'
+                      ? { background: '#F0B90B', color: '#000' }
+                      : { background: 'transparent', color: '#848E9C' }
+                    }
+                  >
+                    EN
+                  </button>
                 </div>
-              )}
+
+                {traders && traders.length > 0 && (
+                  <select
+                    value={selectedTraderId}
+                    onChange={(e) => setSelectedTraderId(e.target.value)}
+                    className="rounded px-3 py-2 text-sm font-medium cursor-pointer transition-colors w-full sm:w-auto"
+                    style={{ background: '#1E2329', border: '1px solid #2B3139', color: '#EAECEF' }}
+                  >
+                    {traders.map((trader) => (
+                      <option key={trader.trader_id} value={trader.trader_id}>
+                        {trader.trader_name} ({trader.ai_model.toUpperCase()})
+                      </option>
+                    ))}
+                  </select>
+                )}
+
+                {status && (
+                  <div
+                    className="flex items-center gap-2 px-3 py-2 rounded w-full sm:w-auto justify-center sm:justify-start"
+                    style={status.is_running
+                      ? { background: 'rgba(14, 203, 129, 0.1)', color: '#0ECB81', border: '1px solid rgba(14, 203, 129, 0.2)' }
+                      : { background: 'rgba(246, 70, 93, 0.1)', color: '#F6465D', border: '1px solid rgba(246, 70, 93, 0.2)' }
+                    }
+                  >
+                    <div
+                      className={`w-2 h-2 rounded-full ${status.is_running ? 'pulse-glow' : ''}`}
+                      style={{ background: status.is_running ? '#0ECB81' : '#F6465D' }}
+                    />
+                    <span className="font-semibold mono text-xs">
+                      {t(status.is_running ? 'running' : 'stopped', language)}
+                    </span>
+                  </div>
+                )}
+              </div>
             </div>
           </div>
         </div>
       </header>
 
       {/* Main Content */}
-      <main className="max-w-[1920px] mx-auto px-6 py-6">
-        {currentPage === 'competition' ? (
-          <CompetitionPage />
-        ) : (
-          <TraderDetailsPage
-            selectedTrader={selectedTrader}
-            status={status}
-            account={account}
-            positions={positions}
-            decisions={decisions}
-            stats={stats}
-            lastUpdate={lastUpdate}
-            language={language}
-          />
-        )}
+      <main className="max-w-[1920px] mx-auto px-4 sm:px-6 py-6">
+        <TraderDetailsPage
+          selectedTrader={selectedTrader}
+          status={status}
+          account={account}
+          positions={positions}
+          decisions={decisions}
+          stats={stats}
+          lastUpdate={lastUpdate}
+          language={language}
+        />
       </main>
 
       {/* Footer */}
@@ -371,6 +362,11 @@ function TraderDetailsPage({
           value={`${account?.total_equity?.toFixed(2) || '0.00'} USDT`}
           change={account?.total_pnl_pct || 0}
           positive={(account?.total_pnl ?? 0) > 0}
+          subtitle={
+            ((account?.initial_balance ?? status?.initial_balance) !== undefined)
+              ? `${t('initialBalance', language)}: ${(account?.initial_balance ?? status?.initial_balance)?.toFixed(2)} USDT`
+              : undefined
+          }
         />
         <StatCard
           title={t('availableBalance', language)}

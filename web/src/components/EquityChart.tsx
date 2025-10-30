@@ -156,10 +156,12 @@ export function EquityChart({ traderId }: EquityChartProps) {
   return (
     <div className="binance-card p-5 animate-fade-in">
       {/* Header */}
-      <div className="flex items-center justify-between mb-4">
-        <div>
-          <h3 className="text-lg font-bold mb-2" style={{ color: '#EAECEF' }}>{t('accountEquityCurve', language)}</h3>
-          <div className="flex items-baseline gap-4">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between mb-4">
+        <div className="w-full">
+          <h3 className="text-lg font-bold mb-2" style={{ color: '#EAECEF' }}>
+            {t('accountEquityCurve', language)}
+          </h3>
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:gap-4">
             <span className="text-3xl font-bold mono" style={{ color: '#EAECEF' }}>
               {account?.total_equity.toFixed(2) || '0.00'}
               <span className="text-lg ml-1" style={{ color: '#848E9C' }}>USDT</span>
@@ -184,10 +186,13 @@ export function EquityChart({ traderId }: EquityChartProps) {
         </div>
 
         {/* Display Mode Toggle */}
-        <div className="flex gap-1 rounded p-1" style={{ background: '#0B0E11', border: '1px solid #2B3139' }}>
+        <div
+          className="flex gap-1 rounded p-1 w-full sm:w-auto"
+          style={{ background: '#0B0E11', border: '1px solid #2B3139' }}
+        >
           <button
             onClick={() => setDisplayMode('dollar')}
-            className="px-4 py-2 rounded text-sm font-bold transition-all"
+            className="px-4 py-2 rounded text-sm font-bold transition-all flex-1 sm:flex-none"
             style={displayMode === 'dollar'
               ? { background: '#F0B90B', color: '#000', boxShadow: '0 2px 8px rgba(240, 185, 11, 0.4)' }
               : { background: 'transparent', color: '#848E9C' }
@@ -197,7 +202,7 @@ export function EquityChart({ traderId }: EquityChartProps) {
           </button>
           <button
             onClick={() => setDisplayMode('percent')}
-            className="px-4 py-2 rounded text-sm font-bold transition-all"
+            className="px-4 py-2 rounded text-sm font-bold transition-all flex-1 sm:flex-none"
             style={displayMode === 'percent'
               ? { background: '#F0B90B', color: '#000', boxShadow: '0 2px 8px rgba(240, 185, 11, 0.4)' }
               : { background: 'transparent', color: '#848E9C' }
