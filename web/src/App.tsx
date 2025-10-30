@@ -17,6 +17,7 @@ import type {
 function App() {
   const { language, setLanguage } = useLanguage();
   const [selectedTraderId, setSelectedTraderId] = useState<string | undefined>();
+  const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [lastUpdate, setLastUpdate] = useState<string>('--:--:--');
 
   // 获取trader列表
@@ -103,8 +104,9 @@ function App() {
       <header className="glass sticky top-0 z-50 backdrop-blur-xl">
         <div className="max-w-[1920px] mx-auto px-4 sm:px-6 py-4">
           <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-            <div className="flex items-start gap-3 sm:items-center">
-              <div className="w-8 h-8 rounded-full flex items-center justify-center text-xl shrink-0" style={{ background: 'linear-gradient(135deg, #F0B90B 0%, #FCD535 100%)' }}>
+            <div className="flex items-center justify-between">
+              <div className="flex items-start gap-3 sm:items-center">
+                <div className="w-8 h-8 rounded-full flex items-center justify-center text-xl shrink-0" style={{ background: 'linear-gradient(135deg, #F0B90B 0%, #FCD535 100%)' }}>
                 ⚡
               </div>
               <div>
@@ -116,8 +118,17 @@ function App() {
                 </p>
               </div>
             </div>
-            <div className="flex flex-col gap-3 w-full lg:w-auto">
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 w-full">
+              <button
+                className="lg:hidden px-3 py-2 rounded text-sm font-semibold"
+                style={{ background: '#1E2329', color: '#EAECEF', border: '1px solid #2B3139' }}
+                onClick={() => setIsMenuOpen((prev) => !prev)}
+              >
+                {isMenuOpen ? '✕' : '☰'}
+              </button>
+            </div>
+
+            <div className="hidden lg:flex flex-col gap-3 w-full lg:w-auto">
+              <div className="hidden lg:grid grid-cols-2 gap-2 w-full">
                 {referralItems.map((item) => (
                   <a
                     key={item.href}
@@ -139,35 +150,115 @@ function App() {
                       {item.subtitle}
                     </span>
                   </a>
-                ))}
+              ))}
+            </div>
+            </div>
+
+            {/* Desktop controls */}
+            <div className="hidden lg:flex flex-wrap items-center gap-3 justify-between">
+              <a
+                href="https://github.com/tinkle-community/nofx"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center gap-2 px-3 py-2 rounded text-sm font-semibold transition-all hover:scale-105"
+                style={{ background: '#1E2329', color: '#848E9C', border: '1px solid #2B3139' }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.background = '#2B3139';
+                  e.currentTarget.style.color = '#EAECEF';
+                  e.currentTarget.style.borderColor = '#F0B90B';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.background = '#1E2329';
+                  e.currentTarget.style.color = '#848E9C';
+                  e.currentTarget.style.borderColor = '#2B3139';
+                }}
+              >
+                <svg width="20" height="20" viewBox="0 0 16 16" fill="currentColor">
+                  <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/>
+                </svg>
+                <span>GitHub</span>
+              </a>
+              <div className="flex gap-1 rounded p-1" style={{ background: '#1E2329' }}>
+                <button
+                  onClick={() => setLanguage('zh')}
+                  className="px-3 py-1.5 rounded text-xs font-semibold transition-all"
+                  style={language === 'zh'
+                    ? { background: '#F0B90B', color: '#000' }
+                    : { background: 'transparent', color: '#848E9C' }
+                  }
+                >
+                  中文
+                </button>
+                <button
+                  onClick={() => setLanguage('en')}
+                  className="px-3 py-1.5 rounded text-xs font-semibold transition-all"
+                  style={language === 'en'
+                    ? { background: '#F0B90B', color: '#000' }
+                    : { background: 'transparent', color: '#848E9C' }
+                  }
+                >
+                  EN
+                </button>
               </div>
-              <div className="flex flex-wrap items-center gap-3 justify-between sm:justify-end">
+
+              {traders && traders.length > 0 && (
+                <select
+                  value={selectedTraderId}
+                  onChange={(e) => setSelectedTraderId(e.target.value)}
+                  className="rounded px-3 py-2 text-sm font-medium cursor-pointer transition-colors"
+                  style={{ background: '#1E2329', border: '1px solid #2B3139', color: '#EAECEF' }}
+                >
+                  {traders.map((trader) => (
+                    <option key={trader.trader_id} value={trader.trader_id}>
+                      {trader.trader_name} ({trader.ai_model.toUpperCase()})
+                    </option>
+                  ))}
+                </select>
+              )}
+
+              {status && (
+                <div
+                  className="flex items-center gap-2 px-3 py-2 rounded justify-center"
+                  style={status.is_running
+                    ? { background: 'rgba(14, 203, 129, 0.1)', color: '#0ECB81', border: '1px solid rgba(14, 203, 129, 0.2)' }
+                    : { background: 'rgba(246, 70, 93, 0.1)', color: '#F6465D', border: '1px solid rgba(246, 70, 93, 0.2)' }
+                  }
+                >
+                  <div
+                    className={`w-2 h-2 rounded-full ${status.is_running ? 'pulse-glow' : ''}`}
+                    style={{ background: status.is_running ? '#0ECB81' : '#F6465D' }}
+                  />
+                  <span className="font-semibold mono text-xs">
+                    {t(status.is_running ? 'running' : 'stopped', language)}
+                  </span>
+                </div>
+              )}
+            </div>
+
+            {/* Mobile menu */}
+            {isMenuOpen && (
+              <div
+                className="lg:hidden mt-3 rounded-xl p-4 flex flex-col gap-3"
+                style={{ background: '#1E2329', border: '1px solid #2B3139' }}
+              >
                 <a
                   href="https://github.com/tinkle-community/nofx"
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="flex items-center gap-2 px-3 py-2 rounded text-sm font-semibold transition-all hover:scale-105 w-full sm:w-auto justify-center"
-                  style={{ background: '#1E2329', color: '#848E9C', border: '1px solid #2B3139' }}
-                  onMouseEnter={(e) => {
-                    e.currentTarget.style.background = '#2B3139';
-                    e.currentTarget.style.color = '#EAECEF';
-                    e.currentTarget.style.borderColor = '#F0B90B';
-                  }}
-                  onMouseLeave={(e) => {
-                    e.currentTarget.style.background = '#1E2329';
-                    e.currentTarget.style.color = '#848E9C';
-                    e.currentTarget.style.borderColor = '#2B3139';
-                  }}
+                  className="flex items-center gap-2 px-3 py-2 rounded text-sm font-semibold transition-all justify-center"
+                  style={{ background: '#0B0E11', color: '#848E9C', border: '1px solid #2B3139' }}
+                  onClick={() => setIsMenuOpen(false)}
                 >
                   <svg width="20" height="20" viewBox="0 0 16 16" fill="currentColor">
                     <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/>
-                  </svg>
+                </svg>
                   <span>GitHub</span>
                 </a>
-                <div className="flex gap-1 rounded p-1 w-full sm:w-auto justify-center sm:justify-start" style={{ background: '#1E2329' }}>
+
+                <div className="flex gap-1 rounded p-1" style={{ background: '#0B0E11', border: '1px solid #2B3139' }}>
                   <button
                     onClick={() => setLanguage('zh')}
-                    className="px-3 py-1.5 rounded text-xs font-semibold transition-all"
+                    className="flex-1 px-3 py-1.5 rounded text-xs font-semibold transition-all"
                     style={language === 'zh'
                       ? { background: '#F0B90B', color: '#000' }
                       : { background: 'transparent', color: '#848E9C' }
@@ -177,7 +268,7 @@ function App() {
                   </button>
                   <button
                     onClick={() => setLanguage('en')}
-                    className="px-3 py-1.5 rounded text-xs font-semibold transition-all"
+                    className="flex-1 px-3 py-1.5 rounded text-xs font-semibold transition-all"
                     style={language === 'en'
                       ? { background: '#F0B90B', color: '#000' }
                       : { background: 'transparent', color: '#848E9C' }
@@ -190,9 +281,12 @@ function App() {
                 {traders && traders.length > 0 && (
                   <select
                     value={selectedTraderId}
-                    onChange={(e) => setSelectedTraderId(e.target.value)}
-                    className="rounded px-3 py-2 text-sm font-medium cursor-pointer transition-colors w-full sm:w-auto"
-                    style={{ background: '#1E2329', border: '1px solid #2B3139', color: '#EAECEF' }}
+                    onChange={(e) => {
+                      setSelectedTraderId(e.target.value);
+                      setIsMenuOpen(false);
+                    }}
+                    className="rounded px-3 py-2 text-sm font-medium cursor-pointer transition-colors w-full"
+                    style={{ background: '#0B0E11', border: '1px solid #2B3139', color: '#EAECEF' }}
                   >
                     {traders.map((trader) => (
                       <option key={trader.trader_id} value={trader.trader_id}>
@@ -204,7 +298,7 @@ function App() {
 
                 {status && (
                   <div
-                    className="flex items-center gap-2 px-3 py-2 rounded w-full sm:w-auto justify-center sm:justify-start"
+                    className="flex items-center gap-2 px-3 py-2 rounded justify-center"
                     style={status.is_running
                       ? { background: 'rgba(14, 203, 129, 0.1)', color: '#0ECB81', border: '1px solid rgba(14, 203, 129, 0.2)' }
                       : { background: 'rgba(246, 70, 93, 0.1)', color: '#F6465D', border: '1px solid rgba(246, 70, 93, 0.2)' }
@@ -220,7 +314,7 @@ function App() {
                   </div>
                 )}
               </div>
-            </div>
+            )}
           </div>
         </div>
       </header>
@@ -242,6 +336,30 @@ function App() {
       {/* Footer */}
       <footer className="mt-16" style={{ borderTop: '1px solid #2B3139', background: '#181A20' }}>
         <div className="max-w-[1920px] mx-auto px-6 py-6 text-center text-sm" style={{ color: '#5E6673' }}>
+          <div className="grid grid-cols-1 gap-2 mb-4 lg:hidden">
+            {referralItems.map((item) => (
+              <a
+                key={item.href}
+                href={item.href}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex flex-col px-3 py-2 rounded-lg transition-all duration-200"
+                style={{
+                  background: 'linear-gradient(135deg, rgba(240, 185, 11, 0.12) 0%, rgba(252, 213, 53, 0.05) 100%)',
+                  border: '1px solid rgba(240, 185, 11, 0.25)',
+                  boxShadow: '0 4px 14px rgba(240, 185, 11, 0.15)',
+                }}
+              >
+                <span className="text-xs font-semibold flex items-center gap-1 justify-center" style={{ color: '#F0B90B' }}>
+                  <span>{item.emoji}</span>
+                  {item.title}
+                </span>
+                <span className="text-[11px] mt-1 leading-snug" style={{ color: '#EAECEF' }}>
+                  {item.subtitle}
+                </span>
+              </a>
+            ))}
+          </div>
           <p>{t('footerTitle', language)}</p>
           <p className="mt-1">{t('footerWarning', language)}</p>
           <div className="mt-4 flex items-center justify-center gap-2">
