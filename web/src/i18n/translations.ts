@@ -59,6 +59,9 @@ export const translations = {
     aiThinking: 'AI Chain of Thought',
     collapse: 'Collapse',
     expand: 'Expand',
+    decisionsPage: 'Page {current} / {total}',
+    prevPage: 'Prev',
+    nextPage: 'Next',
 
     // Equity Chart
     accountEquityCurve: 'Account Equity Curve',
@@ -185,6 +188,9 @@ export const translations = {
     aiThinking: '💭 AI思维链分析',
     collapse: '▼ 收起',
     expand: '▶ 展开',
+    decisionsPage: '第 {current} / {total} 页',
+    prevPage: '上一页',
+    nextPage: '下一页',
 
     // Equity Chart
     accountEquityCurve: '账户净值曲线',

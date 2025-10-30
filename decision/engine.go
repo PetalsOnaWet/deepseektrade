@@ -278,7 +278,7 @@ func buildSystemPrompt(accountEquity float64, btcEthLeverage, altcoinLeverage in
 	sb.WriteString("# 🛡️ 风险保护与跟踪计划\n\n")
 	sb.WriteString("开仓时必须提供 `protection` 字段，指导系统动态风控。所有百分比均指标的价格相对入场价的变动（不放大杠杆）。\n\n")
 	sb.WriteString("- `min_hold_minutes` 按趋势力度设定：强趋势建议≥1440（24小时），弱趋势建议≥720；若设定更短，必须在 `notes` 中说明逻辑\n")
-	sb.WriteString("- `breakeven_trigger_pct` ≈ 3，表示行情顺利走出约3%后，把止损抬到保本\n")
+	sb.WriteString("- `breakeven_trigger_pct` 固定为3（指标的实际行情波动3%）；行情顺利扩张3%后必须把止损抬到保本\n")
 	sb.WriteString("- `breakeven_offset_pct` 用于留出缓冲（如0.2表示保本止损设置在入场价上方0.2%）\n")
 	sb.WriteString("- `trail_activation_pct` ≥ breakeven_trigger_pct，盈利达到该阈值后启用追踪止损\n")
 	sb.WriteString("- `trail_distance_pct` 建议 0.8~1.5，表示追踪止损与最新价保持的百分比距离\n")
@@ -828,8 +828,8 @@ func validateProtectionPlan(plan *ProtectionPlan) error {
 	if plan.MinHoldMinutes < 20 {
 		return fmt.Errorf("min_hold_minutes 过低(%d)，建议至少20分钟以避免噪音交易", plan.MinHoldMinutes)
 	}
-	if plan.BreakEvenTriggerPct < 2.0 || plan.BreakEvenTriggerPct > 10 {
-		return fmt.Errorf("breakeven_trigger_pct %.2f%% 不在合理范围(2-10%%)", plan.BreakEvenTriggerPct)
+	if math.Abs(plan.BreakEvenTriggerPct-3.0) > 0.2 {
+		return fmt.Errorf("breakeven_trigger_pct %.2f%% 必须紧贴3%% (实际行情波动)", plan.BreakEvenTriggerPct)
 	}
 	if plan.BreakEvenOffsetPct < -1.0 || plan.BreakEvenOffsetPct > 1.0 {
 		return fmt.Errorf("breakeven_offset_pct %.2f%% 超出范围(-1%%~1%%)", plan.BreakEvenOffsetPct)

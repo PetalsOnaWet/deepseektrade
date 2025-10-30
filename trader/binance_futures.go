@@ -4,7 +4,9 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"math"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/adshao/go-binance/v2/futures"
@@ -12,14 +14,23 @@ import (
 
 // FuturesTrader 币安合约交易器
 type FuturesTrader struct {
-	client *futures.Client
+	client    *futures.Client
+	symbolMap map[string]*symbolMeta
+}
+
+type symbolMeta struct {
+	quantityPrecision int
+	quantityStep      float64
+	pricePrecision    int
+	priceStep         float64
 }
 
 // NewFuturesTrader 创建合约交易器
 func NewFuturesTrader(apiKey, secretKey string) *FuturesTrader {
 	client := futures.NewClient(apiKey, secretKey)
 	return &FuturesTrader{
-		client: client,
+		client:    client,
+		symbolMap: make(map[string]*symbolMeta),
 	}
 }
 
@@ -436,12 +447,17 @@ func (t *FuturesTrader) SetStopLoss(symbol string, positionSide string, quantity
 		return err
 	}
 
+	stopPriceStr, err := t.FormatPrice(symbol, stopPrice)
+	if err != nil {
+		return err
+	}
+
 	_, err = t.client.NewCreateOrderService().
 		Symbol(symbol).
 		Side(side).
 		PositionSide(posSide).
 		Type(futures.OrderTypeStopMarket).
-		StopPrice(fmt.Sprintf("%.8f", stopPrice)).
+		StopPrice(stopPriceStr).
 		Quantity(quantityStr).
 		WorkingType(futures.WorkingTypeContractPrice).
 		ClosePosition(true).
@@ -451,7 +467,7 @@ func (t *FuturesTrader) SetStopLoss(symbol string, positionSide string, quantity
 		return fmt.Errorf("设置止损失败: %w", err)
 	}
 
-	log.Printf("  止损价设置: %.4f", stopPrice)
+	log.Printf("  止损价设置: %s", stopPriceStr)
 	return nil
 }
 
@@ -474,12 +490,17 @@ func (t *FuturesTrader) SetTakeProfit(symbol string, positionSide string, quanti
 		return err
 	}
 
+	takeProfitStr, err := t.FormatPrice(symbol, takeProfitPrice)
+	if err != nil {
+		return err
+	}
+
 	_, err = t.client.NewCreateOrderService().
 		Symbol(symbol).
 		Side(side).
 		PositionSide(posSide).
 		Type(futures.OrderTypeTakeProfitMarket).
-		StopPrice(fmt.Sprintf("%.8f", takeProfitPrice)).
+		StopPrice(takeProfitStr).
 		Quantity(quantityStr).
 		WorkingType(futures.WorkingTypeContractPrice).
 		ClosePosition(true).
@@ -489,33 +510,8 @@ func (t *FuturesTrader) SetTakeProfit(symbol string, positionSide string, quanti
 		return fmt.Errorf("设置止盈失败: %w", err)
 	}
 
-	log.Printf("  止盈价设置: %.4f", takeProfitPrice)
+	log.Printf("  止盈价设置: %s", takeProfitStr)
 	return nil
-}
-
-// GetSymbolPrecision 获取交易对的数量精度
-func (t *FuturesTrader) GetSymbolPrecision(symbol string) (int, error) {
-	exchangeInfo, err := t.client.NewExchangeInfoService().Do(context.Background())
-	if err != nil {
-		return 0, fmt.Errorf("获取交易规则失败: %w", err)
-	}
-
-	for _, s := range exchangeInfo.Symbols {
-		if s.Symbol == symbol {
-			// 从LOT_SIZE filter获取精度
-			for _, filter := range s.Filters {
-				if filter["filterType"] == "LOT_SIZE" {
-					stepSize := filter["stepSize"].(string)
-					precision := calculatePrecision(stepSize)
-					log.Printf("  %s 数量精度: %d (stepSize: %s)", symbol, precision, stepSize)
-					return precision, nil
-				}
-			}
-		}
-	}
-
-	log.Printf("  ⚠ %s 未找到精度信息，使用默认精度3", symbol)
-	return 3, nil // 默认精度为3
 }
 
 // calculatePrecision 从stepSize计算精度
@@ -563,14 +559,113 @@ func trimTrailingZeros(s string) string {
 
 // FormatQuantity 格式化数量到正确的精度
 func (t *FuturesTrader) FormatQuantity(symbol string, quantity float64) (string, error) {
-	precision, err := t.GetSymbolPrecision(symbol)
+	meta, err := t.getSymbolMeta(symbol)
 	if err != nil {
-		// 如果获取失败，使用默认格式
 		return fmt.Sprintf("%.3f", quantity), nil
 	}
 
+	step := meta.quantityStep
+	if step > 0 {
+		quantity = math.Floor(quantity/step) * step
+		if quantity < step {
+			quantity = step
+		}
+	}
+
+	return formatNumeric(quantity, meta.quantityPrecision), nil
+}
+
+// FormatPrice 格式化价格到正确精度/最小价位
+func (t *FuturesTrader) FormatPrice(symbol string, price float64) (string, error) {
+	meta, err := t.getSymbolMeta(symbol)
+	if err != nil {
+		return fmt.Sprintf("%.4f", price), nil
+	}
+
+	step := meta.priceStep
+	if step > 0 {
+		price = math.Round(price/step) * step
+	}
+
+	return formatNumeric(price, meta.pricePrecision), nil
+}
+
+func formatNumeric(value float64, precision int) string {
+	if precision < 0 {
+		precision = 0
+	}
 	format := fmt.Sprintf("%%.%df", precision)
-	return fmt.Sprintf(format, quantity), nil
+	str := fmt.Sprintf(format, value)
+	str = strings.TrimRight(strings.TrimRight(str, "0"), ".")
+	if str == "" {
+		return "0"
+	}
+	return str
+}
+
+func (t *FuturesTrader) getSymbolMeta(symbol string) (*symbolMeta, error) {
+	key := strings.ToUpper(symbol)
+	if meta, ok := t.symbolMap[key]; ok {
+		return meta, nil
+	}
+
+	exchangeInfo, err := t.client.NewExchangeInfoService().Do(context.Background())
+	if err != nil {
+		return nil, fmt.Errorf("获取交易规则失败: %w", err)
+	}
+
+	var lotStepStr, priceStepStr string
+	for _, s := range exchangeInfo.Symbols {
+		if s.Symbol != key {
+			continue
+		}
+		for _, filter := range s.Filters {
+			switch filter["filterType"] {
+			case "LOT_SIZE":
+				if step, ok := filter["stepSize"].(string); ok {
+					lotStepStr = step
+				}
+			case "MARKET_LOT_SIZE":
+				// 对于部分合约，市价下单限制更严格，优先使用
+				if step, ok := filter["stepSize"].(string); ok && lotStepStr == "" {
+					lotStepStr = step
+				}
+			case "PRICE_FILTER":
+				if tick, ok := filter["tickSize"].(string); ok {
+					priceStepStr = tick
+				}
+			}
+		}
+		break
+	}
+
+	if lotStepStr == "" && priceStepStr == "" {
+		return nil, fmt.Errorf("未找到%s的交易规则", key)
+	}
+
+	meta := &symbolMeta{
+		quantityPrecision: 3,
+		quantityStep:      0.001,
+		pricePrecision:    4,
+		priceStep:         0.0001,
+	}
+
+	if lotStepStr != "" {
+		meta.quantityPrecision = calculatePrecision(lotStepStr)
+		if step, err := strconv.ParseFloat(lotStepStr, 64); err == nil && step > 0 {
+			meta.quantityStep = step
+		}
+	}
+	if priceStepStr != "" {
+		meta.pricePrecision = calculatePrecision(priceStepStr)
+		if step, err := strconv.ParseFloat(priceStepStr, 64); err == nil && step > 0 {
+			meta.priceStep = step
+		}
+	}
+
+	t.symbolMap[key] = meta
+	log.Printf("  %s 数量精度: %d (step: %s) 价格精度: %d (tick: %s)", key, meta.quantityPrecision, lotStepStr, meta.pricePrecision, priceStepStr)
+	return meta, nil
 }
 
 // 辅助函数

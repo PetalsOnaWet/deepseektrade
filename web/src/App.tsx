@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import useSWR from 'swr';
 import { api } from './lib/api';
 import { EquityChart } from './components/EquityChart';
@@ -64,9 +64,9 @@ function App() {
   );
 
   const { data: decisions } = useSWR<DecisionRecord[]>(
-    selectedTraderId ? `decisions/latest-${selectedTraderId}` : null,
-    () => api.getLatestDecisions(selectedTraderId),
-    { refreshInterval: 10000 }
+    selectedTraderId ? `decisions-${selectedTraderId}` : null,
+    () => api.getDecisions(selectedTraderId),
+    { refreshInterval: 15000 }
   );
 
   const { data: stats } = useSWR<Statistics>(
@@ -386,6 +386,39 @@ function TraderDetailsPage({
     );
   }
 
+  const pageSize = 10;
+  const [currentDecisionPage, setCurrentDecisionPage] = useState(1);
+
+  useEffect(() => {
+    setCurrentDecisionPage(1);
+  }, [selectedTrader.trader_id]);
+
+  const sortedDecisions = useMemo<DecisionRecord[]>(() => {
+    if (!decisions || decisions.length === 0) {
+      return [];
+    }
+    const cloned = [...decisions];
+    cloned.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+    return cloned;
+  }, [decisions]);
+
+  useEffect(() => {
+    const totalPages = Math.max(1, Math.ceil(sortedDecisions.length / pageSize));
+    if (currentDecisionPage > totalPages) {
+      setCurrentDecisionPage(totalPages);
+    }
+  }, [sortedDecisions, currentDecisionPage]);
+
+  const displayedDecisions = useMemo<DecisionRecord[]>(() => {
+    if (sortedDecisions.length === 0) {
+      return [];
+    }
+    const start = (currentDecisionPage - 1) * pageSize;
+    return sortedDecisions.slice(start, start + pageSize);
+  }, [sortedDecisions, currentDecisionPage]);
+
+  const decisionTotalPages = Math.max(1, Math.ceil(sortedDecisions.length / pageSize));
+
   const baselineBalance = account?.initial_balance ?? status?.initial_balance ?? 20;
 
   return (
@@ -570,9 +603,9 @@ function TraderDetailsPage({
             </div>
             <div>
               <h2 className="text-xl font-bold" style={{ color: '#EAECEF' }}>{t('recentDecisions', language)}</h2>
-              {decisions && decisions.length > 0 && (
+              {sortedDecisions.length > 0 && (
                 <div className="text-xs" style={{ color: '#848E9C' }}>
-                  {t('lastCycles', language, { count: decisions.length })}
+                  {t('lastCycles', language, { count: sortedDecisions.length })}
                 </div>
               )}
             </div>
@@ -580,8 +613,8 @@ function TraderDetailsPage({
 
           {/* 决策列表 - 可滚动 */}
           <div className="space-y-4 overflow-y-auto pr-2" style={{ maxHeight: 'calc(100vh - 280px)' }}>
-            {decisions && decisions.length > 0 ? (
-              decisions.map((decision, i) => (
+            {displayedDecisions.length > 0 ? (
+              displayedDecisions.map((decision, i) => (
                 <DecisionCard key={i} decision={decision} language={language} />
               ))
             ) : (
@@ -592,6 +625,41 @@ function TraderDetailsPage({
               </div>
             )}
           </div>
+          {sortedDecisions.length > 0 && (
+            <div className="flex items-center justify-between mt-4 px-2 text-xs" style={{ color: '#848E9C' }}>
+              <button
+                className="px-3 py-1 rounded border transition"
+                style={
+                  currentDecisionPage === 1
+                    ? { borderColor: '#2B3139', color: '#2B3139', cursor: 'not-allowed' }
+                    : { borderColor: '#2B3139', color: '#EAECEF' }
+                }
+                disabled={currentDecisionPage === 1}
+                onClick={() => setCurrentDecisionPage((prev) => Math.max(1, prev - 1))}
+              >
+                {t('prevPage', language)}
+              </button>
+              <div className="font-mono">
+                {t('decisionsPage', language, { current: currentDecisionPage, total: decisionTotalPages })}
+              </div>
+              <button
+                className="px-3 py-1 rounded border transition"
+                style={
+                  currentDecisionPage >= decisionTotalPages
+                    ? { borderColor: '#2B3139', color: '#2B3139', cursor: 'not-allowed' }
+                    : { borderColor: '#2B3139', color: '#EAECEF' }
+                }
+                disabled={currentDecisionPage >= decisionTotalPages}
+                onClick={() =>
+                  setCurrentDecisionPage((prev) =>
+                    Math.min(decisionTotalPages, prev + 1)
+                  )
+                }
+              >
+                {t('nextPage', language)}
+              </button>
+            </div>
+          )}
         </div>
         {/* 右侧结束 */}
       </div>
