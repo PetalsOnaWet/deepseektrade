@@ -351,6 +351,8 @@ func buildSystemPrompt(accountEquity float64, btcEthLeverage, altcoinLeverage in
 	sb.WriteString("- `action`: open_long | open_short | close_long | close_short | hold | wait\n")
 	sb.WriteString("- `confidence`: 0-100（开仓建议≥75）\n")
 	sb.WriteString("- 开仓时必填: leverage, position_size_usd, stop_loss, take_profit, confidence, risk_usd, reasoning, protection\n")
+	sb.WriteString("- 计算仓位时，请先算 `risk_budget = 账户净值 × 0.03`，再求 `distance = |entry - stop_loss| / entry`，严格使用 `position_size_usd = risk_budget / distance`（若 distance 太小导致仓位超限，宁可放弃交易）\n")
+	sb.WriteString("- 同时把 `risk_usd = position_size_usd × distance` 填入 JSON；不得依赖系统自动缩减仓位\n")
 	sb.WriteString("- `protection`: 趋势风控计划，须包含 `min_hold_minutes`、`breakeven_trigger_pct`、`breakeven_offset_pct`、`trail_activation_pct`、`trail_distance_pct`，并根据需要设置 `exit_mode`/`reversal_trigger_pct`\n\n")
 
 	// === 关键提醒 ===

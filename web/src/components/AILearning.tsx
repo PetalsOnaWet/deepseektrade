@@ -33,6 +33,10 @@ interface PerformanceAnalysis {
   win_rate: number;
   avg_win: number;
   avg_loss: number;
+  max_profit_amount: number;
+  max_loss_amount: number;
+  best_trade?: TradeOutcome | null;
+  worst_trade?: TradeOutcome | null;
   profit_factor: number;
   sharpe_ratio: number;
   recent_trades: TradeOutcome[];
@@ -84,9 +88,97 @@ export default function AILearning({ traderId }: AILearningProps) {
   }
 
   const symbolStats = performance.symbol_stats || {};
-  const symbolStatsList = Object.values(symbolStats).filter(stat => stat != null).sort(
-    (a, b) => (b.total_pn_l || 0) - (a.total_pn_l || 0)
-  );
+  const symbolStatsList = Object.values(symbolStats)
+    .filter((stat) => stat != null)
+    .sort((a, b) => (b.total_pn_l || 0) - (a.total_pn_l || 0));
+  const maxProfit = performance.max_profit_amount || 0;
+  const maxLoss = performance.max_loss_amount || 0;
+
+  const formatPnL = (value: number) => {
+    const formatted = Math.abs(value) >= 1000 ? value.toFixed(0) : value.toFixed(2);
+    return `${value >= 0 ? '+' : ''}${formatted}`;
+  };
+
+  const renderTradeCard = (
+    trade: TradeOutcome | null | undefined,
+    labelKey: 'bestTrade' | 'worstTrade'
+  ) => {
+    const label = t(labelKey, language);
+
+    if (!trade) {
+      return (
+        <div
+          className="rounded-2xl p-5"
+          style={{ background: '#1E2329', border: '1px solid rgba(48, 54, 63, 0.8)' }}
+        >
+          <div
+            className="text-xs font-semibold uppercase tracking-wider mb-3"
+            style={{ color: '#94A3B8' }}
+          >
+            {label}
+          </div>
+          <div style={{ color: '#6B7280' }}>{t('noTradeSummary', language)}</div>
+        </div>
+      );
+    }
+
+    const sideLabel = trade.side === 'long' ? t('long', language) : t('short', language);
+
+    return (
+      <div
+        className="rounded-2xl p-5 relative overflow-hidden"
+        style={{
+          background:
+            trade.pn_l >= 0
+              ? 'linear-gradient(135deg, rgba(16, 185, 129, 0.16) 0%, rgba(30, 35, 41, 0.9) 100%)'
+              : 'linear-gradient(135deg, rgba(248, 113, 113, 0.16) 0%, rgba(30, 35, 41, 0.9) 100%)',
+          border:
+            trade.pn_l >= 0
+              ? '1px solid rgba(16, 185, 129, 0.35)'
+              : '1px solid rgba(248, 113, 113, 0.35)',
+        }}
+      >
+        <div
+          className="absolute top-0 right-0 w-24 h-24 rounded-full opacity-20"
+          style={{
+            background:
+              trade.pn_l >= 0
+                ? 'radial-gradient(circle, #34D399 0%, transparent 70%)'
+                : 'radial-gradient(circle, #F87171 0%, transparent 70%)',
+            filter: 'blur(24px)',
+          }}
+        />
+        <div className="relative space-y-2">
+          <div
+            className="text-xs font-semibold uppercase tracking-wider"
+            style={{ color: trade.pn_l >= 0 ? '#6EE7B7' : '#FCA5A5' }}
+          >
+            {label}
+          </div>
+          <div className="text-xl font-semibold" style={{ color: '#EAECEF' }}>
+            {trade.symbol} · {sideLabel.toUpperCase()}
+          </div>
+          <div className="flex flex-col gap-1 text-xs" style={{ color: '#94A3B8' }}>
+            <div>
+              {t('entry', language)}: {trade.open_price.toFixed(4)}
+            </div>
+            <div>
+              {t('exit', language)}: {trade.close_price.toFixed(4)}
+            </div>
+            <div>
+              {t('realisedPnL', language)}:{' '}
+              <span style={{ color: trade.pn_l >= 0 ? '#22D3A3' : '#F87171' }}>
+                {formatPnL(trade.pn_l)} USDT
+              </span>
+            </div>
+            <div>
+              {t('duration', language)}: {trade.duration}
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  };
 
   return (
     <div className="space-y-8">
@@ -215,6 +307,68 @@ export default function AILearning({ traderId }: AILearningProps) {
             <div className="text-xs" style={{ color: '#FCA5A5' }}>📉 USDT Average</div>
           </div>
         </div>
+      </div>
+
+      {/* 极值统计 */}
+      <div className="grid grid-cols-1 lg:grid-cols-4 gap-4">
+        <div
+          className="rounded-2xl p-5 relative overflow-hidden"
+          style={{
+            background:
+              'linear-gradient(135deg, rgba(34, 197, 94, 0.2) 0%, rgba(30, 35, 41, 0.85) 100%)',
+            border: '1px solid rgba(34, 197, 94, 0.35)',
+          }}
+        >
+          <div
+            className="absolute top-0 right-0 w-24 h-24 rounded-full opacity-25"
+            style={{
+              background: 'radial-gradient(circle, #22C55E 0%, transparent 70%)',
+              filter: 'blur(24px)',
+            }}
+          />
+          <div className="relative">
+            <div
+              className="text-xs font-semibold mb-3 uppercase tracking-wider"
+              style={{ color: '#86EFAC' }}
+            >
+              {t('maxProfitAmount', language)}
+            </div>
+            <div className="text-3xl font-bold mono" style={{ color: '#22C55E' }}>
+              {formatPnL(maxProfit)} USDT
+            </div>
+          </div>
+        </div>
+
+        <div
+          className="rounded-2xl p-5 relative overflow-hidden"
+          style={{
+            background:
+              'linear-gradient(135deg, rgba(248, 113, 113, 0.2) 0%, rgba(30, 35, 41, 0.85) 100%)',
+            border: '1px solid rgba(248, 113, 113, 0.35)',
+          }}
+        >
+          <div
+            className="absolute top-0 right-0 w-24 h-24 rounded-full opacity-25"
+            style={{
+              background: 'radial-gradient(circle, #F87171 0%, transparent 70%)',
+              filter: 'blur(24px)',
+            }}
+          />
+          <div className="relative">
+            <div
+              className="text-xs font-semibold mb-3 uppercase tracking-wider"
+              style={{ color: '#FCA5A5' }}
+            >
+              {t('maxLossAmount', language)}
+            </div>
+            <div className="text-3xl font-bold mono" style={{ color: '#F87171' }}>
+              {formatPnL(maxLoss)} USDT
+            </div>
+          </div>
+        </div>
+
+        {renderTradeCard(performance.best_trade, 'bestTrade')}
+        {renderTradeCard(performance.worst_trade, 'worstTrade')}
       </div>
 
       {/* 关键指标：夏普比率 & 盈亏比 - 2列网格 */}

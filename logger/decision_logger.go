@@ -356,18 +356,22 @@ type TradeOutcome struct {
 
 // PerformanceAnalysis 交易表现分析
 type PerformanceAnalysis struct {
-	TotalTrades   int                           `json:"total_trades"`   // 总交易数
-	WinningTrades int                           `json:"winning_trades"` // 盈利交易数
-	LosingTrades  int                           `json:"losing_trades"`  // 亏损交易数
-	WinRate       float64                       `json:"win_rate"`       // 胜率
-	AvgWin        float64                       `json:"avg_win"`        // 平均盈利
-	AvgLoss       float64                       `json:"avg_loss"`       // 平均亏损
-	ProfitFactor  float64                       `json:"profit_factor"`  // 盈亏比
-	SharpeRatio   float64                       `json:"sharpe_ratio"`   // 夏普比率（风险调整后收益）
-	RecentTrades  []TradeOutcome                `json:"recent_trades"`  // 最近N笔交易
-	SymbolStats   map[string]*SymbolPerformance `json:"symbol_stats"`   // 各币种表现
-	BestSymbol    string                        `json:"best_symbol"`    // 表现最好的币种
-	WorstSymbol   string                        `json:"worst_symbol"`   // 表现最差的币种
+	TotalTrades     int                           `json:"total_trades"`      // 总交易数
+	WinningTrades   int                           `json:"winning_trades"`    // 盈利交易数
+	LosingTrades    int                           `json:"losing_trades"`     // 亏损交易数
+	WinRate         float64                       `json:"win_rate"`          // 胜率
+	AvgWin          float64                       `json:"avg_win"`           // 平均盈利
+	AvgLoss         float64                       `json:"avg_loss"`          // 平均亏损
+	ProfitFactor    float64                       `json:"profit_factor"`     // 盈亏比
+	SharpeRatio     float64                       `json:"sharpe_ratio"`      // 夏普比率（风险调整后收益）
+	RecentTrades    []TradeOutcome                `json:"recent_trades"`     // 最近N笔交易
+	SymbolStats     map[string]*SymbolPerformance `json:"symbol_stats"`      // 各币种表现
+	BestSymbol      string                        `json:"best_symbol"`       // 表现最好的币种
+	WorstSymbol     string                        `json:"worst_symbol"`      // 表现最差的币种
+	MaxProfitAmount float64                       `json:"max_profit_amount"` // 最大单笔盈利
+	MaxLossAmount   float64                       `json:"max_loss_amount"`   // 最大单笔亏损（负数）
+	BestTrade       *TradeOutcome                 `json:"best_trade,omitempty"`
+	WorstTrade      *TradeOutcome                 `json:"worst_trade,omitempty"`
 }
 
 // SymbolPerformance 币种表现统计
@@ -399,6 +403,9 @@ func (l *DecisionLogger) AnalyzePerformance(lookbackCycles int) (*PerformanceAna
 		RecentTrades: []TradeOutcome{},
 		SymbolStats:  make(map[string]*SymbolPerformance),
 	}
+
+	maxProfit := math.Inf(-1)
+	minLoss := math.Inf(1)
 
 	// 追踪持仓状态：symbol_side -> {side, openPrice, openTime, quantity, leverage}
 	openPositions := make(map[string]map[string]interface{})
@@ -472,6 +479,17 @@ func (l *DecisionLogger) AnalyzePerformance(lookbackCycles int) (*PerformanceAna
 
 					analysis.RecentTrades = append(analysis.RecentTrades, outcome)
 					analysis.TotalTrades++
+
+					if pnl > maxProfit {
+						maxProfit = pnl
+						tradeCopy := outcome
+						analysis.BestTrade = &tradeCopy
+					}
+					if pnl < minLoss {
+						minLoss = pnl
+						tradeCopy := outcome
+						analysis.WorstTrade = &tradeCopy
+					}
 
 					if pnl > 0 {
 						analysis.WinningTrades++
@@ -557,6 +575,13 @@ func (l *DecisionLogger) AnalyzePerformance(lookbackCycles int) (*PerformanceAna
 	}
 	if !hasWorst {
 		analysis.WorstSymbol = ""
+	}
+
+	if maxProfit != math.Inf(-1) {
+		analysis.MaxProfitAmount = maxProfit
+	}
+	if minLoss != math.Inf(1) {
+		analysis.MaxLossAmount = minLoss
 	}
 
 	// 只保留最近的交易（倒序：最新的在前）
