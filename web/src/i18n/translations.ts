@@ -25,6 +25,10 @@ export const translations = {
     positions: 'Positions',
     margin: 'Margin',
     free: 'Free',
+    entriesExecuted: 'Entries Executed',
+    exitsExecuted: 'Exits Executed',
+    sinceLaunch: 'Since launch',
+    winsLosses: 'Wins {wins} · Losses {losses}',
 
     // Positions Table
     currentPositions: 'Current Positions',
@@ -147,6 +151,10 @@ export const translations = {
     positions: '持仓',
     margin: '保证金',
     free: '空闲',
+    entriesExecuted: '开仓次数',
+    exitsExecuted: '平仓次数',
+    sinceLaunch: '自启动以来',
+    winsLosses: '胜 {wins} · 负 {losses}',
 
     // Positions Table
     currentPositions: '当前持仓',

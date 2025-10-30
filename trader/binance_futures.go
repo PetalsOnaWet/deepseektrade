@@ -81,6 +81,30 @@ func (t *FuturesTrader) GetPositions() ([]map[string]interface{}, error) {
 	return result, nil
 }
 
+// GetTradeIncome 获取指定订单或交易的真实盈亏
+func (t *FuturesTrader) GetTradeIncome(symbol string, startTime, endTime int64, limit int) ([]*futures.IncomeHistory, error) {
+	service := t.client.NewGetIncomeHistoryService().
+		Symbol(symbol).
+		IncomeType("REALIZED_PNL")
+
+	if startTime > 0 {
+		service.StartTime(startTime)
+	}
+	if endTime > 0 {
+		service.EndTime(endTime)
+	}
+	if limit > 0 {
+		service.Limit(int64(limit))
+	}
+
+	income, err := service.Do(context.Background())
+	if err != nil {
+		return nil, fmt.Errorf("获取收益记录失败: %w", err)
+	}
+
+	return income, nil
+}
+
 // SetLeverage 设置杠杆（智能判断+冷却期）
 func (t *FuturesTrader) SetLeverage(symbol string, leverage int) error {
 	// 先尝试获取当前杠杆（从持仓信息）

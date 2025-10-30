@@ -23,6 +23,8 @@ type Data struct {
 	FundingRate       float64
 	IntradaySeries    *IntradayData
 	LongerTermContext *LongerTermData
+	DailyContext      *DailyData
+	DerivedMetrics    *DerivedMetrics
 }
 
 // OIData Open Interest数据
@@ -52,6 +54,31 @@ type LongerTermData struct {
 	RSI14Values   []float64
 }
 
+// DailyData 日线级别数据
+type DailyData struct {
+	EMA20         float64
+	EMA50         float64
+	ATR14         float64
+	CloseSeries   []float64
+	MACDValues    []float64
+	RSI14Values   []float64
+	AverageVolume float64
+	CurrentVolume float64
+}
+
+// DerivedMetrics 预计算的趋势指标
+type DerivedMetrics struct {
+	PriceVsEMA20Pct float64
+	EMA20Slope      float64
+	MACDSlope       float64
+	RSI7Slope       float64
+	HTFTrend        string
+	VolatilityRatio float64
+	DailyTrend      string
+	DailyPriceVsEMA float64
+	DailyEMA20Slope float64
+}
+
 // Kline K线数据
 type Kline struct {
 	OpenTime  int64
@@ -78,6 +105,12 @@ func Get(symbol string) (*Data, error) {
 	klines4h, err := getKlines(symbol, "4h", 60) // 多获取用于计算指标
 	if err != nil {
 		return nil, fmt.Errorf("获取4小时K线失败: %v", err)
+	}
+
+	// 获取日线K线数据 (最近60个)
+	klines1d, err := getKlines(symbol, "1d", 90)
+	if err != nil {
+		return nil, fmt.Errorf("获取日线K线失败: %v", err)
 	}
 
 	// 计算当前指标 (基于3分钟最新数据)
@@ -121,6 +154,12 @@ func Get(symbol string) (*Data, error) {
 	// 计算长期数据
 	longerTermData := calculateLongerTermData(klines4h)
 
+	// 计算日线数据
+	dailyData := calculateDailyData(klines1d)
+
+	// 派生趋势指标
+	derivedMetrics := calculateDerivedMetrics(currentPrice, currentEMA20, intradayData, longerTermData, dailyData)
+
 	return &Data{
 		Symbol:            symbol,
 		CurrentPrice:      currentPrice,
@@ -133,6 +172,8 @@ func Get(symbol string) (*Data, error) {
 		FundingRate:       fundingRate,
 		IntradaySeries:    intradayData,
 		LongerTermContext: longerTermData,
+		DailyContext:      dailyData,
+		DerivedMetrics:    derivedMetrics,
 	}, nil
 }
 
@@ -386,6 +427,134 @@ func calculateLongerTermData(klines []Kline) *LongerTermData {
 	return data
 }
 
+func calculateDailyData(klines []Kline) *DailyData {
+	if len(klines) == 0 {
+		return nil
+	}
+
+	data := &DailyData{
+		MACDValues:  make([]float64, 0, 10),
+		RSI14Values: make([]float64, 0, 10),
+		CloseSeries: make([]float64, 0, len(klines)),
+	}
+
+	for _, k := range klines {
+		data.CloseSeries = append(data.CloseSeries, k.Close)
+	}
+
+	data.EMA20 = calculateEMA(klines, 20)
+	data.EMA50 = calculateEMA(klines, 50)
+	data.ATR14 = calculateATR(klines, 14)
+
+	// 计算成交量
+	sumVol := 0.0
+	for _, k := range klines {
+		sumVol += k.Volume
+	}
+	data.AverageVolume = sumVol / float64(len(klines))
+	data.CurrentVolume = klines[len(klines)-1].Volume
+
+	start := len(klines) - 10
+	if start < 0 {
+		start = 0
+	}
+
+	for i := start; i < len(klines); i++ {
+		if i >= 25 {
+			macd := calculateMACD(klines[:i+1])
+			data.MACDValues = append(data.MACDValues, macd)
+		}
+		if i >= 14 {
+			rsi := calculateRSI(klines[:i+1], 14)
+			data.RSI14Values = append(data.RSI14Values, rsi)
+		}
+	}
+
+	return data
+}
+
+func calculateDerivedMetrics(currentPrice, currentEMA float64, intraday *IntradayData, longer *LongerTermData, daily *DailyData) *DerivedMetrics {
+	if intraday == nil {
+		return nil
+	}
+
+	metrics := &DerivedMetrics{}
+
+	if currentEMA > 0 {
+		metrics.PriceVsEMA20Pct = ((currentPrice - currentEMA) / currentEMA) * 100
+	}
+
+	if len(intraday.EMA20Values) >= 2 {
+		first := intraday.EMA20Values[0]
+		last := intraday.EMA20Values[len(intraday.EMA20Values)-1]
+		if first != 0 {
+			metrics.EMA20Slope = (last - first) / first * 100
+		} else {
+			metrics.EMA20Slope = last - first
+		}
+	}
+
+	if len(intraday.MACDValues) >= 2 {
+		first := intraday.MACDValues[0]
+		last := intraday.MACDValues[len(intraday.MACDValues)-1]
+		metrics.MACDSlope = last - first
+	}
+
+	if len(intraday.RSI7Values) >= 2 {
+		first := intraday.RSI7Values[0]
+		last := intraday.RSI7Values[len(intraday.RSI7Values)-1]
+		metrics.RSI7Slope = last - first
+	}
+
+	metrics.HTFTrend = "neutral"
+	if longer != nil && len(longer.MACDValues) >= 2 {
+		last := longer.MACDValues[len(longer.MACDValues)-1]
+		prev := longer.MACDValues[len(longer.MACDValues)-2]
+		switch {
+		case last > 0 && last >= prev:
+			metrics.HTFTrend = "bullish"
+		case last < 0 && last <= prev:
+			metrics.HTFTrend = "bearish"
+		default:
+			metrics.HTFTrend = "neutral"
+		}
+	}
+
+	if longer != nil && longer.ATR14 > 0 {
+		metrics.VolatilityRatio = longer.ATR3 / longer.ATR14
+	}
+
+	if daily != nil {
+		if daily.EMA20 > 0 {
+			metrics.DailyPriceVsEMA = ((currentPrice - daily.EMA20) / daily.EMA20) * 100
+		}
+		if len(daily.MACDValues) >= 2 {
+			last := daily.MACDValues[len(daily.MACDValues)-1]
+			prev := daily.MACDValues[len(daily.MACDValues)-2]
+			switch {
+			case last > 0 && last >= prev:
+				metrics.DailyTrend = "bullish"
+			case last < 0 && last <= prev:
+				metrics.DailyTrend = "bearish"
+			default:
+				metrics.DailyTrend = "neutral"
+			}
+		} else {
+			metrics.DailyTrend = "neutral"
+		}
+
+		if len(daily.CloseSeries) >= 20 {
+			first := daily.CloseSeries[len(daily.CloseSeries)-20]
+			last := daily.CloseSeries[len(daily.CloseSeries)-1]
+			if first != 0 {
+				metrics.DailyEMA20Slope = (last - first) / first * 100
+			}
+		}
+	}
+
+	return metrics
+}
+
 // getOpenInterestData 获取OI数据
 func getOpenInterestData(symbol string) (*OIData, error) {
 	url := fmt.Sprintf("https://fapi.binance.com/fapi/v1/openInterest?symbol=%s", symbol)
@@ -493,6 +662,21 @@ func Format(data *Data) string {
 		}
 	}
 
+	if data.DerivedMetrics != nil {
+		sb.WriteString("Derived trend metrics:\n\n")
+		sb.WriteString(fmt.Sprintf("price_vs_ema20_pct = %.3f, ema20_slope = %.3f, macd_slope = %.3f, rsi7_slope = %.3f, volatility_ratio = %.3f, htf_trend = %s, daily_trend = %s, daily_price_vs_ema20_pct = %.3f, daily_ema20_slope = %.3f\n\n",
+			data.DerivedMetrics.PriceVsEMA20Pct,
+			data.DerivedMetrics.EMA20Slope,
+			data.DerivedMetrics.MACDSlope,
+			data.DerivedMetrics.RSI7Slope,
+			data.DerivedMetrics.VolatilityRatio,
+			data.DerivedMetrics.HTFTrend,
+			data.DerivedMetrics.DailyTrend,
+			data.DerivedMetrics.DailyPriceVsEMA,
+			data.DerivedMetrics.DailyEMA20Slope,
+		))
+	}
+
 	if data.LongerTermContext != nil {
 		sb.WriteString("Longer‑term context (4‑hour timeframe):\n\n")
 
@@ -514,6 +698,26 @@ func Format(data *Data) string {
 		}
 	}
 
+	if data.DailyContext != nil {
+		sb.WriteString("Daily context (1‑day timeframe):\n\n")
+		sb.WriteString(fmt.Sprintf("20‑Period EMA: %.3f vs. 50‑Period EMA: %.3f\n\n", data.DailyContext.EMA20, data.DailyContext.EMA50))
+		sb.WriteString(fmt.Sprintf("14‑Period ATR: %.3f\n\n", data.DailyContext.ATR14))
+		sb.WriteString(fmt.Sprintf("Current Volume: %.3f vs. Average Volume: %.3f\n\n", data.DailyContext.CurrentVolume, data.DailyContext.AverageVolume))
+
+		dailySummary := map[string]interface{}{
+			"ema20":      data.DailyContext.EMA20,
+			"ema50":      data.DailyContext.EMA50,
+			"atr14":      data.DailyContext.ATR14,
+			"macd_mult":  truncateSlice(data.DailyContext.MACDValues, 6),
+			"rsi14_mult": truncateSlice(data.DailyContext.RSI14Values, 6),
+		}
+		if jsonBlob, err := json.MarshalIndent(dailySummary, "", "  "); err == nil {
+			sb.WriteString("```json\n")
+			sb.WriteString(string(jsonBlob))
+			sb.WriteString("\n```\n\n")
+		}
+	}
+
 	return sb.String()
 }
 
@@ -524,6 +728,13 @@ func formatFloatSlice(values []float64) string {
 		strValues[i] = fmt.Sprintf("%.3f", v)
 	}
 	return "[" + strings.Join(strValues, ", ") + "]"
+}
+
+func truncateSlice(values []float64, limit int) []float64 {
+	if len(values) <= limit {
+		return values
+	}
+	return values[len(values)-limit:]
 }
 
 // Normalize 标准化symbol,确保是USDT交易对

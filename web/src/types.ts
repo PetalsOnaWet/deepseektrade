@@ -51,6 +51,7 @@ export interface DecisionAction {
   timestamp: string;
   success: boolean;
   error?: string;
+  realized_pnl?: number;
 }
 
 export interface AccountSnapshot {
@@ -82,6 +83,10 @@ export interface Statistics {
   failed_cycles: number;
   total_open_positions: number;
   total_close_positions: number;
+  total_trades: number;
+  winning_trades: number;
+  losing_trades: number;
+  win_rate: number;
 }
 
 // 新增：竞赛相关类型

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"math"
 	"nofx/market"
 	"nofx/mcp"
 	"nofx/pool"
@@ -13,17 +14,22 @@ import (
 
 // PositionInfo 持仓信息
 type PositionInfo struct {
-	Symbol           string  `json:"symbol"`
-	Side             string  `json:"side"` // "long" or "short"
-	EntryPrice       float64 `json:"entry_price"`
-	MarkPrice        float64 `json:"mark_price"`
-	Quantity         float64 `json:"quantity"`
-	Leverage         int     `json:"leverage"`
-	UnrealizedPnL    float64 `json:"unrealized_pnl"`
-	UnrealizedPnLPct float64 `json:"unrealized_pnl_pct"`
-	LiquidationPrice float64 `json:"liquidation_price"`
-	MarginUsed       float64 `json:"margin_used"`
-	UpdateTime       int64   `json:"update_time"` // 持仓更新时间戳（毫秒）
+	Symbol           string                 `json:"symbol"`
+	Side             string                 `json:"side"` // "long" or "short"
+	EntryPrice       float64                `json:"entry_price"`
+	MarkPrice        float64                `json:"mark_price"`
+	Quantity         float64                `json:"quantity"`
+	Leverage         int                    `json:"leverage"`
+	UnrealizedPnL    float64                `json:"unrealized_pnl"`
+	UnrealizedPnLPct float64                `json:"unrealized_pnl_pct"`
+	LiquidationPrice float64                `json:"liquidation_price"`
+	MarginUsed       float64                `json:"margin_used"`
+	EntryTime        int64                  `json:"entry_time"` // 持仓首次出现时间戳（毫秒）
+	HoldMinutes      int                    `json:"hold_minutes"`
+	RiskUSD          float64                `json:"risk_usd,omitempty"`
+	RiskPct          float64                `json:"risk_pct,omitempty"`
+	Protection       *ProtectionPlan        `json:"protection,omitempty"`
+	ProtectionStatus *PositionProtectionLog `json:"protection_status,omitempty"`
 }
 
 // AccountInfo 账户信息
@@ -66,19 +72,34 @@ type Context struct {
 	Performance     interface{}             `json:"-"` // 历史表现分析（logger.PerformanceAnalysis）
 	BTCETHLeverage  int                     `json:"-"` // BTC/ETH杠杆倍数（从配置读取）
 	AltcoinLeverage int                     `json:"-"` // 山寨币杠杆倍数（从配置读取）
+	Risk            *RiskSnapshot           `json:"risk_snapshot,omitempty"`
 }
 
 // Decision AI的交易决策
 type Decision struct {
-	Symbol          string  `json:"symbol"`
-	Action          string  `json:"action"` // "open_long", "open_short", "close_long", "close_short", "hold", "wait"
-	Leverage        int     `json:"leverage,omitempty"`
-	PositionSizeUSD float64 `json:"position_size_usd,omitempty"`
-	StopLoss        float64 `json:"stop_loss,omitempty"`
-	TakeProfit      float64 `json:"take_profit,omitempty"`
-	Confidence      int     `json:"confidence,omitempty"` // 信心度 (0-100)
-	RiskUSD         float64 `json:"risk_usd,omitempty"`   // 最大美元风险
-	Reasoning       string  `json:"reasoning"`
+	Symbol          string          `json:"symbol"`
+	Action          string          `json:"action"` // "open_long", "open_short", "close_long", "close_short", "hold", "wait"
+	Leverage        int             `json:"leverage,omitempty"`
+	PositionSizeUSD float64         `json:"position_size_usd,omitempty"`
+	StopLoss        float64         `json:"stop_loss,omitempty"`
+	TakeProfit      float64         `json:"take_profit,omitempty"`
+	Confidence      int             `json:"confidence,omitempty"` // 信心度 (0-100)
+	RiskUSD         float64         `json:"risk_usd,omitempty"`   // 最大美元风险
+	Reasoning       string          `json:"reasoning"`
+	Protection      *ProtectionPlan `json:"protection,omitempty"`
+}
+
+// ProtectionPlan 趋势持仓的风险保护与跟踪参数
+type ProtectionPlan struct {
+	Strategy            string  `json:"strategy,omitempty"`              // 例如: "trend_follow"
+	MinHoldMinutes      int     `json:"min_hold_minutes,omitempty"`      // 最少持仓时长
+	BreakEvenTriggerPct float64 `json:"breakeven_trigger_pct,omitempty"` // 价格相对入场上涨/下跌多少%(不含杠杆)触发保本
+	BreakEvenOffsetPct  float64 `json:"breakeven_offset_pct,omitempty"`  // 保本止损相对入场价偏移百分比
+	TrailActivationPct  float64 `json:"trail_activation_pct,omitempty"`  // 盈利达到多少%启动追踪止损
+	TrailDistancePct    float64 `json:"trail_distance_pct,omitempty"`    // 追踪止损与价格的距离百分比
+	ExitMode            string  `json:"exit_mode,omitempty"`             // fixed | trailing | reversal
+	ReversalTriggerPct  float64 `json:"reversal_trigger_pct,omitempty"`  // 反转止盈触发阈值
+	Notes               string  `json:"notes,omitempty"`                 // 可选说明
 }
 
 // FullDecision AI的完整决策（包含思维链）
@@ -107,7 +128,7 @@ func GetFullDecision(ctx *Context) (*FullDecision, error) {
 	}
 
 	// 4. 解析AI响应
-	decision, err := parseFullDecisionResponse(aiResponse, ctx.Account.TotalEquity, ctx.BTCETHLeverage, ctx.AltcoinLeverage)
+	decision, err := parseFullDecisionResponse(aiResponse, ctx)
 	if err != nil {
 		return nil, fmt.Errorf("解析AI响应失败: %w", err)
 	}
@@ -244,16 +265,39 @@ func buildSystemPrompt(accountEquity float64, btcEthLeverage, altcoinLeverage in
 	sb.WriteString("如果你发现自己每个周期都在交易 → 说明标准太低\n")
 	sb.WriteString("如果你发现持仓<30分钟就平仓 → 说明太急躁\n\n")
 
+	// === 趋势持仓纪律 ===
+	sb.WriteString("# 📈 趋势持仓纪律\n\n")
+	sb.WriteString("你是一名顺势交易员，目标是在趋势中“拿得住”。\n\n")
+	sb.WriteString("- 趋势未反转前不要提前离场，避免短线频繁换手\n")
+	sb.WriteString("- 参考 3min / 4h / 1d 多周期，只有级别共振才开仓\n")
+	sb.WriteString("- 默认策略：除非出现强烈反向信号或风控触发，目标持仓 30-60 分钟，并在行情反转或达标时主动处理\n")
+	sb.WriteString("- 收益≥预期后，通过追踪止损锁定利润，让盈利继续扩张\n")
+	sb.WriteString("- 如果信号减弱但仍在趋势中，降低仓位而不是立刻清仓\n\n")
+
+	// === 风险保护 ===
+	sb.WriteString("# 🛡️ 风险保护与跟踪计划\n\n")
+	sb.WriteString("开仓时必须提供 `protection` 字段，指导系统动态风控。所有百分比均指标的价格相对入场价的变动（不放大杠杆）。\n\n")
+	sb.WriteString("- `min_hold_minutes` 建议≥30，根据趋势力度设定，并说明何时允许提前退出\n")
+	sb.WriteString("- `breakeven_trigger_pct` ≈ 3，表示行情顺利走出约3%后，把止损抬到保本\n")
+	sb.WriteString("- `breakeven_offset_pct` 用于留出缓冲（如0.2表示保本止损设置在入场价上方0.2%）\n")
+	sb.WriteString("- `trail_activation_pct` ≥ breakeven_trigger_pct，盈利达到该阈值后启用追踪止损\n")
+	sb.WriteString("- `trail_distance_pct` 建议 0.8~1.5，表示追踪止损与最新价保持的百分比距离\n")
+	sb.WriteString("- `exit_mode`: `fixed`（使用明确止盈价）、`trailing`（依赖追踪止损）、`reversal`（等待趋势反转时由你主动发出平仓指令，可结合 `reversal_trigger_pct`）\n")
+	sb.WriteString("- `reversal_trigger_pct`：当选择`reversal`时，用于量化“确认反转”所需的回撤或背离幅度\n")
+	sb.WriteString("- 盈利扩张过程中必须持续动态更新止损：`trailing` 模式要随着价格推升止损，`reversal` 模式也需在条件满足时主动下移止损并准备平仓\n")
+	sb.WriteString("- 根据趋势强弱可在 `notes` 中说明调整逻辑，并在每轮输出时写明是否调整保护计划及原因\n\n")
+
 	// === 开仓信号强度 ===
 	sb.WriteString("# 🎯 开仓标准（严格）\n\n")
 	sb.WriteString("只在**强信号**时开仓，不确定就观望。\n\n")
 	sb.WriteString("**你拥有的完整数据**：\n")
-	sb.WriteString("- 📊 **原始序列**：3分钟价格序列(MidPrices数组) + 4小时K线序列\n")
-	sb.WriteString("- 📈 **技术序列**：EMA20序列、MACD序列、RSI7序列、RSI14序列\n")
+	sb.WriteString("- 📊 **原始序列**：3分钟价格序列(MidPrices数组) + 4小时/日线结构化上下文\n")
+	sb.WriteString("- 📈 **技术序列**：EMA20 / MACD / RSI7 / RSI14 等多周期指标\n")
 	sb.WriteString("- 💰 **资金序列**：成交量序列、持仓量(OI)序列、资金费率\n")
+	sb.WriteString("- 🧭 **派生信号**：系统提供的趋势JSON，包括日线/4小时趋势、斜率、波动率比等\n")
 	sb.WriteString("- 🎯 **筛选标记**：AI500评分 / OI_Top排名（如果有标注）\n\n")
 	sb.WriteString("**分析方法**（完全由你自主决定）：\n")
-	sb.WriteString("- 自由运用序列数据，你可以做但不限于趋势分析、形态识别、支撑阻力、技术阻力位、斐波那契、波动带计算\n")
+	sb.WriteString("- 自由运用序列数据，你可以做但不限于趋势分析、K线形态识别、支撑阻力、技术阻力位、斐波那契、波动带计算\n")
 	sb.WriteString("- 多维度交叉验证（价格+量+OI+指标+序列形态）\n")
 	sb.WriteString("- 用你认为最有效的方法发现高确定性机会\n")
 	sb.WriteString("- 综合信心度 ≥ 75 才开仓\n\n")
@@ -286,9 +330,9 @@ func buildSystemPrompt(accountEquity float64, btcEthLeverage, altcoinLeverage in
 	// === 决策流程 ===
 	sb.WriteString("# 📋 决策流程\n\n")
 	sb.WriteString("1. **分析夏普比率**: 当前策略是否有效？需要调整吗？\n")
-	sb.WriteString("2. **评估持仓**: 趋势是否改变？是否该止盈/止损？\n")
+	sb.WriteString("2. **评估持仓**: 趋势是否改变？是否需要抬升保本、缩紧追踪止损、部分减仓？\n")
 	sb.WriteString("3. **寻找新机会**: 有强信号吗？多空机会？\n")
-	sb.WriteString("4. **输出决策**: 思维链分析 + JSON\n\n")
+	sb.WriteString("4. **输出决策**: 明确说明保护计划是否调整，并输出思维链 + JSON\n\n")
 
 	// === 输出格式 ===
 	sb.WriteString("# 📤 输出格式\n\n")
@@ -296,13 +340,14 @@ func buildSystemPrompt(accountEquity float64, btcEthLeverage, altcoinLeverage in
 	sb.WriteString("简洁分析你的思考过程\n\n")
 	sb.WriteString("**第二步: JSON决策数组**\n\n")
 	sb.WriteString("```json\n[\n")
-	sb.WriteString(fmt.Sprintf("  {\"symbol\": \"BTCUSDT\", \"action\": \"open_short\", \"leverage\": %d, \"position_size_usd\": %.0f, \"stop_loss\": 97000, \"take_profit\": 91000, \"confidence\": 85, \"risk_usd\": 300, \"reasoning\": \"下跌趋势+MACD死叉\"},\n", btcEthLeverage, accountEquity*5))
+	sb.WriteString(fmt.Sprintf("  {\"symbol\": \"BTCUSDT\", \"action\": \"open_short\", \"leverage\": %d, \"position_size_usd\": %.0f, \"stop_loss\": 97000, \"take_profit\": 91000, \"confidence\": 85, \"risk_usd\": 300, \"protection\": {\"strategy\": \"trend_follow\", \"min_hold_minutes\": 60, \"breakeven_trigger_pct\": 3.0, \"breakeven_offset_pct\": 0.2, \"trail_activation_pct\": 4.0, \"trail_distance_pct\": 1.0, \"exit_mode\": \"trailing\"}, \"reasoning\": \"下跌趋势+MACD死叉\"},\n", btcEthLeverage, accountEquity*5))
 	sb.WriteString("  {\"symbol\": \"ETHUSDT\", \"action\": \"close_long\", \"reasoning\": \"止盈离场\"}\n")
 	sb.WriteString("]\n```\n\n")
 	sb.WriteString("**字段说明**:\n")
 	sb.WriteString("- `action`: open_long | open_short | close_long | close_short | hold | wait\n")
 	sb.WriteString("- `confidence`: 0-100（开仓建议≥75）\n")
-	sb.WriteString("- 开仓时必填: leverage, position_size_usd, stop_loss, take_profit, confidence, risk_usd, reasoning\n\n")
+	sb.WriteString("- 开仓时必填: leverage, position_size_usd, stop_loss, take_profit, confidence, risk_usd, reasoning, protection\n")
+	sb.WriteString("- `protection`: 趋势风控计划，须包含 `min_hold_minutes`、`breakeven_trigger_pct`、`breakeven_offset_pct`、`trail_activation_pct`、`trail_distance_pct`，并根据需要设置 `exit_mode`/`reversal_trigger_pct`\n\n")
 
 	// === 关键提醒 ===
 	sb.WriteString("---\n\n")
@@ -340,19 +385,36 @@ func buildUserPrompt(ctx *Context) string {
 		ctx.Account.PositionCount))
 
 	// 持仓（完整市场数据）
+	if ctx.Risk != nil && ctx.Risk.PositionCount > 0 {
+		sb.WriteString("## 风险快照\n")
+		sb.WriteString(fmt.Sprintf("- 总风险: %.2f USDT (%.2f%% 账户净值)\n", ctx.Risk.TotalRiskUSD, ctx.Risk.TotalRiskPct))
+		sb.WriteString(fmt.Sprintf("- 最大单笔风险: %.2f%%\n", ctx.Risk.MaxSingleRiskPct))
+		sb.WriteString(fmt.Sprintf("- 多头敞口: %.2f USDT | 空头敞口: %.2f USDT | 净敞口: %.2f USDT\n\n",
+			ctx.Risk.LongExposureUSD, ctx.Risk.ShortExposureUSD, ctx.Risk.NetExposureUSD))
+
+		if riskJSON, err := json.MarshalIndent(ctx.Risk, "", "  "); err == nil {
+			sb.WriteString("```json\n")
+			sb.WriteString(string(riskJSON))
+			sb.WriteString("\n```\n\n")
+		}
+	}
+
 	if len(ctx.Positions) > 0 {
 		sb.WriteString("## 当前持仓\n")
+		structuredPositions := make([]map[string]interface{}, 0, len(ctx.Positions))
+
 		for i, pos := range ctx.Positions {
 			// 计算持仓时长
 			holdingDuration := ""
-			if pos.UpdateTime > 0 {
-				durationMs := time.Now().UnixMilli() - pos.UpdateTime
-				durationMin := durationMs / (1000 * 60) // 转换为分钟
-				if durationMin < 60 {
-					holdingDuration = fmt.Sprintf(" | 持仓时长%d分钟", durationMin)
+			holdMinutes := 0
+			if pos.EntryTime > 0 {
+				durationMs := time.Now().UnixMilli() - pos.EntryTime
+				holdMinutes = int(durationMs / (1000 * 60))
+				if holdMinutes < 60 {
+					holdingDuration = fmt.Sprintf(" | 持仓时长%d分钟", holdMinutes)
 				} else {
-					durationHour := durationMin / 60
-					durationMinRemainder := durationMin % 60
+					durationHour := holdMinutes / 60
+					durationMinRemainder := holdMinutes % 60
 					holdingDuration = fmt.Sprintf(" | 持仓时长%d小时%d分钟", durationHour, durationMinRemainder)
 				}
 			}
@@ -367,6 +429,34 @@ func buildUserPrompt(ctx *Context) string {
 				sb.WriteString(market.Format(marketData))
 				sb.WriteString("\n")
 			}
+
+			positionMap := map[string]interface{}{
+				"symbol":         pos.Symbol,
+				"side":           pos.Side,
+				"entry_price":    pos.EntryPrice,
+				"mark_price":     pos.MarkPrice,
+				"leverage":       pos.Leverage,
+				"quantity":       pos.Quantity,
+				"hold_minutes":   holdMinutes,
+				"risk_usd":       pos.RiskUSD,
+				"risk_pct":       pos.RiskPct,
+				"unrealized_pct": pos.UnrealizedPnLPct,
+			}
+
+			if pos.Protection != nil {
+				positionMap["protection"] = pos.Protection
+			}
+			if pos.ProtectionStatus != nil {
+				positionMap["protection_status"] = pos.ProtectionStatus
+			}
+
+			structuredPositions = append(structuredPositions, positionMap)
+		}
+
+		if posJSON, err := json.MarshalIndent(structuredPositions, "", "  "); err == nil {
+			sb.WriteString("```json\n")
+			sb.WriteString(string(posJSON))
+			sb.WriteString("\n```\n\n")
 		}
 	} else {
 		sb.WriteString("**当前持仓**: 无\n\n")
@@ -417,7 +507,7 @@ func buildUserPrompt(ctx *Context) string {
 }
 
 // parseFullDecisionResponse 解析AI的完整决策响应
-func parseFullDecisionResponse(aiResponse string, accountEquity float64, btcEthLeverage, altcoinLeverage int) (*FullDecision, error) {
+func parseFullDecisionResponse(aiResponse string, ctx *Context) (*FullDecision, error) {
 	// 1. 提取思维链
 	cotTrace := extractCoTTrace(aiResponse)
 
@@ -431,7 +521,7 @@ func parseFullDecisionResponse(aiResponse string, accountEquity float64, btcEthL
 	}
 
 	// 3. 验证决策
-	if err := validateDecisions(decisions, accountEquity, btcEthLeverage, altcoinLeverage); err != nil {
+	if err := validateDecisions(decisions, ctx); err != nil {
 		return &FullDecision{
 			CoTTrace:  cotTrace,
 			Decisions: decisions,
@@ -499,9 +589,9 @@ func fixMissingQuotes(jsonStr string) string {
 }
 
 // validateDecisions 验证所有决策（需要账户信息和杠杆配置）
-func validateDecisions(decisions []Decision, accountEquity float64, btcEthLeverage, altcoinLeverage int) error {
-	for i, decision := range decisions {
-		if err := validateDecision(&decision, accountEquity, btcEthLeverage, altcoinLeverage); err != nil {
+func validateDecisions(decisions []Decision, ctx *Context) error {
+	for i := range decisions {
+		if err := validateDecision(&decisions[i], ctx); err != nil {
 			return fmt.Errorf("决策 #%d 验证失败: %w", i+1, err)
 		}
 	}
@@ -531,7 +621,7 @@ func findMatchingBracket(s string, start int) int {
 }
 
 // validateDecision 验证单个决策的有效性
-func validateDecision(d *Decision, accountEquity float64, btcEthLeverage, altcoinLeverage int) error {
+func validateDecision(d *Decision, ctx *Context) error {
 	// 验证action
 	validActions := map[string]bool{
 		"open_long":   true,
@@ -549,11 +639,11 @@ func validateDecision(d *Decision, accountEquity float64, btcEthLeverage, altcoi
 	// 开仓操作必须提供完整参数
 	if d.Action == "open_long" || d.Action == "open_short" {
 		// 根据币种使用配置的杠杆上限
-		maxLeverage := altcoinLeverage          // 山寨币使用配置的杠杆
-		maxPositionValue := accountEquity * 1.5 // 山寨币最多1.5倍账户净值
+		maxLeverage := ctx.AltcoinLeverage                // 山寨币使用配置的杠杆
+		maxPositionValue := ctx.Account.TotalEquity * 1.5 // 山寨币最多1.5倍账户净值
 		if d.Symbol == "BTCUSDT" || d.Symbol == "ETHUSDT" {
-			maxLeverage = btcEthLeverage          // BTC和ETH使用配置的杠杆
-			maxPositionValue = accountEquity * 10 // BTC/ETH最多10倍账户净值
+			maxLeverage = ctx.BTCETHLeverage                // BTC和ETH使用配置的杠杆
+			maxPositionValue = ctx.Account.TotalEquity * 10 // BTC/ETH最多10倍账户净值
 		}
 
 		if d.Leverage <= 0 {
@@ -621,7 +711,114 @@ func validateDecision(d *Decision, accountEquity float64, btcEthLeverage, altcoi
 			return fmt.Errorf("风险回报比过低(%.2f:1)，必须≥3.0:1 [风险:%.2f%% 收益:%.2f%%] [止损:%.2f 止盈:%.2f]",
 				riskRewardRatio, riskPercent, rewardPercent, d.StopLoss, d.TakeProfit)
 		}
+
+		if d.Protection == nil {
+			return fmt.Errorf("开仓必须提供protection风控计划")
+		}
+		if err := validateProtectionPlan(d.Protection); err != nil {
+			return fmt.Errorf("protection设置无效: %w", err)
+		}
+		// 验证风险敞口不超过总资金3%
+		marketData := ctx.MarketDataMap[d.Symbol]
+		if marketData == nil {
+			return fmt.Errorf("缺少%s的市场数据，无法验证风险敞口", d.Symbol)
+		}
+
+		currentPrice := marketData.CurrentPrice
+		if currentPrice <= 0 {
+			return fmt.Errorf("%s 当前价格无效，无法验证风险敞口", d.Symbol)
+		}
+
+		priceDiff := math.Abs(currentPrice - d.StopLoss)
+		if priceDiff == 0 {
+			return fmt.Errorf("%s 止损价与入场价相同，风险计算无意义", d.Symbol)
+		}
+
+		riskUSD := (priceDiff / currentPrice) * d.PositionSizeUSD
+		maxAllowedRisk := ctx.Account.TotalEquity * 0.03
+		if riskUSD > maxAllowedRisk {
+			return fmt.Errorf("%s 风险敞口 %.2f USDT 超出账户净值3%%限制 (最大允许 %.2f)", d.Symbol, riskUSD, maxAllowedRisk)
+		}
+		d.RiskUSD = riskUSD
 	}
 
 	return nil
+}
+
+// validateProtectionPlan 验证趋势风控计划
+func validateProtectionPlan(plan *ProtectionPlan) error {
+	if plan.Strategy == "" {
+		plan.Strategy = "trend_follow"
+	}
+	exitMode := strings.ToLower(plan.ExitMode)
+	if exitMode == "" {
+		exitMode = "trailing"
+	}
+	switch exitMode {
+	case "fixed", "trailing", "reversal":
+		plan.ExitMode = exitMode
+	default:
+		return fmt.Errorf("exit_mode 无效: %s，可选 fixed/trailing/reversal", plan.ExitMode)
+	}
+	if plan.MinHoldMinutes < 20 {
+		return fmt.Errorf("min_hold_minutes 过低(%d)，建议至少20分钟以避免噪音交易", plan.MinHoldMinutes)
+	}
+	if plan.BreakEvenTriggerPct < 2.0 || plan.BreakEvenTriggerPct > 10 {
+		return fmt.Errorf("breakeven_trigger_pct %.2f%% 不在合理范围(2-10%%)", plan.BreakEvenTriggerPct)
+	}
+	if plan.BreakEvenOffsetPct < -1.0 || plan.BreakEvenOffsetPct > 1.0 {
+		return fmt.Errorf("breakeven_offset_pct %.2f%% 超出范围(-1%%~1%%)", plan.BreakEvenOffsetPct)
+	}
+	if plan.TrailActivationPct == 0 {
+		plan.TrailActivationPct = plan.BreakEvenTriggerPct
+	}
+	if plan.TrailActivationPct < plan.BreakEvenTriggerPct {
+		return fmt.Errorf("trail_activation_pct %.2f%% 必须 ≥ breakeven_trigger_pct %.2f%%", plan.TrailActivationPct, plan.BreakEvenTriggerPct)
+	}
+	if exitMode == "reversal" {
+		if plan.ReversalTriggerPct <= 0 {
+			return fmt.Errorf("reversal_trigger_pct 必须大于0，用于量化反转止盈触发条件")
+		}
+		// 反转策略下若未使用追踪止损，可允许distance为0
+		if plan.TrailDistancePct < 0 || plan.TrailDistancePct > 5 {
+			return fmt.Errorf("trail_distance_pct %.2f%% 无效，需在0-5%%之间", plan.TrailDistancePct)
+		}
+	} else {
+		if plan.TrailDistancePct <= 0 || plan.TrailDistancePct > 5 {
+			return fmt.Errorf("trail_distance_pct %.2f%% 无效，需在0-5%%之间", plan.TrailDistancePct)
+		}
+	}
+	return nil
+}
+
+// PositionProtectionLog 记录保护计划执行状态
+type PositionProtectionLog struct {
+	ExitMode           string  `json:"exit_mode,omitempty"`
+	BreakevenApplied   bool    `json:"breakeven_applied"`
+	CurrentStop        float64 `json:"current_stop,omitempty"`
+	RegisteredAt       int64   `json:"registered_at,omitempty"`
+	TrailActivationPct float64 `json:"trail_activation_pct,omitempty"`
+	TrailDistancePct   float64 `json:"trail_distance_pct,omitempty"`
+	Notes              string  `json:"notes,omitempty"`
+}
+
+// PositionExposure 风险敞口
+type PositionExposure struct {
+	Symbol      string  `json:"symbol"`
+	Side        string  `json:"side"`
+	NotionalUSD float64 `json:"notional_usd"`
+	RiskUSD     float64 `json:"risk_usd"`
+	RiskPct     float64 `json:"risk_pct"`
+}
+
+// RiskSnapshot 总风险快照
+type RiskSnapshot struct {
+	TotalRiskUSD     float64                      `json:"total_risk_usd"`
+	TotalRiskPct     float64                      `json:"total_risk_pct"`
+	MaxSingleRiskPct float64                      `json:"max_single_risk_pct"`
+	LongExposureUSD  float64                      `json:"long_exposure_usd"`
+	ShortExposureUSD float64                      `json:"short_exposure_usd"`
+	NetExposureUSD   float64                      `json:"net_exposure_usd"`
+	PositionCount    int                          `json:"position_count"`
+	SymbolRisks      map[string]*PositionExposure `json:"symbol_risks"`
 }

@@ -213,7 +213,7 @@ nofx/
 
 使用本系统前，您需要一个币安合约账户。**使用我们的推荐链接注册可享受手续费优惠：**
 
-**🎁 [注册币安 - 享手续费折扣](https://www.binance.com/join?ref=TINKLEVIP)**
+**🎁 [注册币安 - 享手续费折扣](https://www.maxweb.red/join?ref=BTCB888)**
 
 ### 注册步骤：
 

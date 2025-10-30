@@ -50,6 +50,7 @@ export interface DecisionAction {
   timestamp: string;
   success: boolean;
   error: string;
+  realized_pnl?: number;
 }
 
 // 决策记录
@@ -90,4 +91,8 @@ export interface Statistics {
   failed_cycles: number;
   total_open_positions: number;
   total_close_positions: number;
+  total_trades: number;
+  winning_trades: number;
+  losing_trades: number;
+  win_rate: number;
 }

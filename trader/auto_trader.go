@@ -4,11 +4,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"math"
 	"nofx/decision"
 	"nofx/logger"
 	"nofx/market"
 	"nofx/mcp"
 	"nofx/pool"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -66,22 +68,35 @@ type AutoTraderConfig struct {
 
 // AutoTrader 自动交易器
 type AutoTrader struct {
-	id                   string                 // Trader唯一标识
-	name                 string                 // Trader显示名称
-	aiModel              string                 // AI模型名称
-	exchange             string                 // 交易平台名称
-	config               AutoTraderConfig
-	trader               Trader                 // 使用Trader接口（支持多平台）
-	decisionLogger       *logger.DecisionLogger // 决策日志记录器
-	initialBalance       float64
-	dailyPnL             float64
-	lastResetTime        time.Time
-	stopUntil            time.Time
-	isRunning            bool
-	startTime            time.Time                 // 系统启动时间
-	callCount            int                       // AI调用次数
-	positionFirstSeenTime map[string]int64         // 持仓首次出现时间 (symbol_side -> timestamp毫秒)
+	id                    string // Trader唯一标识
+	name                  string // Trader显示名称
+	aiModel               string // AI模型名称
+	exchange              string // 交易平台名称
+	config                AutoTraderConfig
+	trader                Trader                 // 使用Trader接口（支持多平台）
+	decisionLogger        *logger.DecisionLogger // 决策日志记录器
+	initialBalance        float64
+	dailyPnL              float64
+	lastResetTime         time.Time
+	stopUntil             time.Time
+	isRunning             bool
+	startTime             time.Time        // 系统启动时间
+	callCount             int              // AI调用次数
+	positionFirstSeenTime map[string]int64 // 持仓首次出现时间 (symbol_side -> timestamp毫秒)
+	protectionPlans       map[string]*protectionState
 }
+
+// protectionState 跟踪单个持仓的风控计划执行状态
+type protectionState struct {
+	Plan             decision.ProtectionPlan
+	Side             string
+	EntryPrice       float64
+	RegisteredAt     time.Time
+	BreakevenApplied bool
+	LastStopPrice    float64
+}
+
+const stopUpdateTolerance = 0.0005 // 0.05%的价差避免频繁调整
 
 // NewAutoTrader 创建自动交易器
 func NewAutoTrader(config AutoTraderConfig) (*AutoTrader, error) {
@@ -159,19 +174,20 @@ func NewAutoTrader(config AutoTraderConfig) (*AutoTrader, error) {
 	decisionLogger := logger.NewDecisionLogger(logDir)
 
 	return &AutoTrader{
-		id:                   config.ID,
-		name:                 config.Name,
-		aiModel:              config.AIModel,
-		exchange:             config.Exchange,
-		config:               config,
-		trader:               trader,
-		decisionLogger:       decisionLogger,
-		initialBalance:       config.InitialBalance,
-		lastResetTime:        time.Now(),
-		startTime:            time.Now(),
-		callCount:            0,
-		isRunning:            false,
+		id:                    config.ID,
+		name:                  config.Name,
+		aiModel:               config.AIModel,
+		exchange:              config.Exchange,
+		config:                config,
+		trader:                trader,
+		decisionLogger:        decisionLogger,
+		initialBalance:        config.InitialBalance,
+		lastResetTime:         time.Now(),
+		startTime:             time.Now(),
+		callCount:             0,
+		isRunning:             false,
 		positionFirstSeenTime: make(map[string]int64),
+		protectionPlans:       make(map[string]*protectionState),
 	}, nil
 }
 
@@ -213,9 +229,9 @@ func (at *AutoTrader) Stop() {
 func (at *AutoTrader) runCycle() error {
 	at.callCount++
 
-	log.Printf("\n" + strings.Repeat("=", 70))
+	log.Print("\n" + strings.Repeat("=", 70))
 	log.Printf("⏰ %s - AI决策周期 #%d", time.Now().Format("2006-01-02 15:04:05"), at.callCount)
-	log.Printf(strings.Repeat("=", 70))
+	log.Print(strings.Repeat("=", 70))
 
 	// 创建决策记录
 	record := &logger.DecisionRecord{
@@ -280,6 +296,12 @@ func (at *AutoTrader) runCycle() error {
 	log.Printf("📊 账户净值: %.2f USDT | 可用: %.2f USDT | 持仓: %d",
 		ctx.Account.TotalEquity, ctx.Account.AvailableBalance, ctx.Account.PositionCount)
 
+	// 3.1 根据策略自动调整保护性止损
+	for _, msg := range at.applyProtectionPlans(ctx) {
+		log.Println(msg)
+		record.ExecutionLog = append(record.ExecutionLog, msg)
+	}
+
 	// 4. 调用AI获取完整决策
 	log.Println("🤖 正在请求AI分析并决策...")
 	decision, err := decision.GetFullDecision(ctx)
@@ -300,11 +322,11 @@ func (at *AutoTrader) runCycle() error {
 
 		// 打印AI思维链（即使有错误）
 		if decision != nil && decision.CoTTrace != "" {
-			log.Printf("\n" + strings.Repeat("-", 70))
+			log.Print("\n" + strings.Repeat("-", 70))
 			log.Println("💭 AI思维链分析（错误情况）:")
 			log.Println(strings.Repeat("-", 70))
 			log.Println(decision.CoTTrace)
-			log.Printf(strings.Repeat("-", 70) + "\n")
+			log.Print(strings.Repeat("-", 70) + "\n")
 		}
 
 		at.decisionLogger.LogDecision(record)
@@ -312,11 +334,11 @@ func (at *AutoTrader) runCycle() error {
 	}
 
 	// 5. 打印AI思维链
-	log.Printf("\n" + strings.Repeat("-", 70))
+	log.Print("\n" + strings.Repeat("-", 70))
 	log.Println("💭 AI思维链分析:")
 	log.Println(strings.Repeat("-", 70))
 	log.Println(decision.CoTTrace)
-	log.Printf(strings.Repeat("-", 70) + "\n")
+	log.Print(strings.Repeat("-", 70) + "\n")
 
 	// 6. 打印AI决策
 	log.Printf("📋 AI决策列表 (%d 个):\n", len(decision.Decisions))
@@ -445,7 +467,39 @@ func (at *AutoTrader) buildTradingContext() (*decision.Context, error) {
 			// 新持仓，记录当前时间
 			at.positionFirstSeenTime[posKey] = time.Now().UnixMilli()
 		}
-		updateTime := at.positionFirstSeenTime[posKey]
+		entryTime := at.positionFirstSeenTime[posKey]
+		holdMinutes := 0
+		if entryTime > 0 {
+			holdMinutes = int((time.Now().UnixMilli() - entryTime) / (1000 * 60))
+		}
+
+		var protection *decision.ProtectionPlan
+		var protectionStatus *decision.PositionProtectionLog
+		var riskUSD float64
+
+		if state, ok := at.protectionPlans[posKey]; ok {
+			planCopy := state.Plan
+			protection = &planCopy
+			currentStop := state.LastStopPrice
+			if currentStop > 0 {
+				riskUSD = calculatePositionRisk(entryPrice, currentStop, quantity)
+			}
+
+			regMillis := int64(0)
+			if !state.RegisteredAt.IsZero() {
+				regMillis = state.RegisteredAt.UnixMilli()
+			}
+
+			protectionStatus = &decision.PositionProtectionLog{
+				ExitMode:           planCopy.ExitMode,
+				BreakevenApplied:   state.BreakevenApplied,
+				CurrentStop:        currentStop,
+				RegisteredAt:       regMillis,
+				TrailActivationPct: planCopy.TrailActivationPct,
+				TrailDistancePct:   planCopy.TrailDistancePct,
+				Notes:              planCopy.Notes,
+			}
+		}
 
 		positionInfos = append(positionInfos, decision.PositionInfo{
 			Symbol:           symbol,
@@ -458,7 +512,11 @@ func (at *AutoTrader) buildTradingContext() (*decision.Context, error) {
 			UnrealizedPnLPct: pnlPct,
 			LiquidationPrice: liquidationPrice,
 			MarginUsed:       marginUsed,
-			UpdateTime:       updateTime,
+			EntryTime:        entryTime,
+			HoldMinutes:      holdMinutes,
+			RiskUSD:          riskUSD,
+			Protection:       protection,
+			ProtectionStatus: protectionStatus,
 		})
 	}
 
@@ -513,13 +571,65 @@ func (at *AutoTrader) buildTradingContext() (*decision.Context, error) {
 		performance = nil
 	}
 
+	var riskSnapshot *decision.RiskSnapshot
+	if len(positionInfos) > 0 {
+		riskSnapshot = &decision.RiskSnapshot{
+			SymbolRisks:   make(map[string]*decision.PositionExposure),
+			PositionCount: len(positionInfos),
+		}
+		var totalRisk float64
+		var maxSingle float64
+		var longExposure float64
+		var shortExposure float64
+
+		for i := range positionInfos {
+			if positionInfos[i].RiskUSD > 0 && totalEquity > 0 {
+				positionInfos[i].RiskPct = (positionInfos[i].RiskUSD / totalEquity) * 100
+			}
+			if positionInfos[i].RiskPct > maxSingle {
+				maxSingle = positionInfos[i].RiskPct
+			}
+			totalRisk += positionInfos[i].RiskUSD
+
+			notional := positionInfos[i].MarkPrice * positionInfos[i].Quantity
+			if positionInfos[i].Side == "long" {
+				longExposure += notional
+			} else {
+				shortExposure += notional
+			}
+
+			symbolRisk, ok := riskSnapshot.SymbolRisks[positionInfos[i].Symbol]
+			if !ok {
+				symbolRisk = &decision.PositionExposure{
+					Symbol: positionInfos[i].Symbol,
+					Side:   positionInfos[i].Side,
+				}
+				riskSnapshot.SymbolRisks[positionInfos[i].Symbol] = symbolRisk
+			}
+			symbolRisk.NotionalUSD += notional
+			symbolRisk.RiskUSD += positionInfos[i].RiskUSD
+			if totalEquity > 0 {
+				symbolRisk.RiskPct = (symbolRisk.RiskUSD / totalEquity) * 100
+			}
+		}
+
+		riskSnapshot.TotalRiskUSD = totalRisk
+		if totalEquity > 0 {
+			riskSnapshot.TotalRiskPct = (totalRisk / totalEquity) * 100
+		}
+		riskSnapshot.MaxSingleRiskPct = maxSingle
+		riskSnapshot.LongExposureUSD = longExposure
+		riskSnapshot.ShortExposureUSD = shortExposure
+		riskSnapshot.NetExposureUSD = longExposure - shortExposure
+	}
+
 	// 6. 构建上下文
 	ctx := &decision.Context{
-		CurrentTime:      time.Now().Format("2006-01-02 15:04:05"),
-		RuntimeMinutes:   int(time.Since(at.startTime).Minutes()),
-		CallCount:        at.callCount,
-		BTCETHLeverage:   at.config.BTCETHLeverage,   // 使用配置的杠杆倍数
-		AltcoinLeverage:  at.config.AltcoinLeverage,  // 使用配置的杠杆倍数
+		CurrentTime:     time.Now().Format("2006-01-02 15:04:05"),
+		RuntimeMinutes:  int(time.Since(at.startTime).Minutes()),
+		CallCount:       at.callCount,
+		BTCETHLeverage:  at.config.BTCETHLeverage,  // 使用配置的杠杆倍数
+		AltcoinLeverage: at.config.AltcoinLeverage, // 使用配置的杠杆倍数
 		Account: decision.AccountInfo{
 			TotalEquity:      totalEquity,
 			AvailableBalance: availableBalance,
@@ -532,9 +642,184 @@ func (at *AutoTrader) buildTradingContext() (*decision.Context, error) {
 		Positions:      positionInfos,
 		CandidateCoins: candidateCoins,
 		Performance:    performance, // 添加历史表现分析
+		Risk:           riskSnapshot,
 	}
 
 	return ctx, nil
+}
+
+func calculatePositionRisk(entryPrice, stopPrice, quantity float64) float64 {
+	if entryPrice <= 0 || stopPrice <= 0 || quantity <= 0 {
+		return 0
+	}
+	return math.Abs(entryPrice-stopPrice) * quantity
+}
+
+// applyProtectionPlans 根据风控计划自动调整止损
+func (at *AutoTrader) applyProtectionPlans(ctx *decision.Context) []string {
+	if len(at.protectionPlans) == 0 || len(ctx.Positions) == 0 {
+		return nil
+	}
+
+	positionMap := make(map[string]decision.PositionInfo)
+	for _, pos := range ctx.Positions {
+		key := positionKey(pos.Symbol, pos.Side)
+		positionMap[key] = pos
+	}
+
+	// 清理已平仓的计划
+	for key := range at.protectionPlans {
+		if _, ok := positionMap[key]; !ok {
+			delete(at.protectionPlans, key)
+		}
+	}
+
+	var logs []string
+
+	for key, state := range at.protectionPlans {
+		pos, ok := positionMap[key]
+		if !ok || pos.Quantity == 0 {
+			continue
+		}
+
+		// 同步最新入场价（可能因加仓/减仓而改变）
+		state.EntryPrice = pos.EntryPrice
+
+		plan := state.Plan
+		favorablePct := calcFavorablePct(state.Side, state.EntryPrice, pos.MarkPrice)
+		positionSide := strings.ToUpper(state.Side)
+		exitMode := state.Plan.ExitMode
+		if exitMode == "" {
+			exitMode = "trailing"
+		}
+
+		// 保本止损
+		if !state.BreakevenApplied && favorablePct >= plan.BreakEvenTriggerPct {
+			stopPrice := breakEvenStopPrice(state.Side, state.EntryPrice, plan.BreakEvenOffsetPct)
+			if err := at.trader.SetStopLoss(pos.Symbol, positionSide, pos.Quantity, stopPrice); err != nil {
+				logs = append(logs, fmt.Sprintf("⚠️ %s %s 保本止损设置失败: %v", pos.Symbol, positionSide, err))
+			} else {
+				state.BreakevenApplied = true
+				state.LastStopPrice = stopPrice
+				logs = append(logs, fmt.Sprintf("🔒 %s %s 保本止损抬至 %.4f (偏移%.2f%%)", pos.Symbol, positionSide, stopPrice, plan.BreakEvenOffsetPct))
+			}
+		}
+
+		// 追踪止损
+		if exitMode == "trailing" && favorablePct >= plan.TrailActivationPct {
+			candidate := trailingStopCandidate(state.Side, pos.MarkPrice, plan.TrailDistancePct)
+			// 不允许低于保本价
+			breakevenPrice := breakEvenStopPrice(state.Side, state.EntryPrice, plan.BreakEvenOffsetPct)
+			if state.Side == "long" {
+				if candidate < breakevenPrice {
+					candidate = breakevenPrice
+				}
+				if shouldUpdateStop(state.LastStopPrice, candidate, true) {
+					if err := at.trader.SetStopLoss(pos.Symbol, positionSide, pos.Quantity, candidate); err != nil {
+						logs = append(logs, fmt.Sprintf("⚠️ %s %s 追踪止损设置失败: %v", pos.Symbol, positionSide, err))
+					} else {
+						state.LastStopPrice = candidate
+						logs = append(logs, fmt.Sprintf("📈 %s LONG 追踪止损上调至 %.4f (距现价 %.2f%%)", pos.Symbol, candidate, plan.TrailDistancePct))
+					}
+				}
+			} else {
+				if candidate > breakevenPrice {
+					candidate = breakevenPrice
+				}
+				if shouldUpdateStop(state.LastStopPrice, candidate, false) {
+					if err := at.trader.SetStopLoss(pos.Symbol, positionSide, pos.Quantity, candidate); err != nil {
+						logs = append(logs, fmt.Sprintf("⚠️ %s %s 追踪止损设置失败: %v", pos.Symbol, positionSide, err))
+					} else {
+						state.LastStopPrice = candidate
+						logs = append(logs, fmt.Sprintf("📉 %s SHORT 追踪止损下调至 %.4f (距现价 %.2f%%)", pos.Symbol, candidate, plan.TrailDistancePct))
+					}
+				}
+			}
+		}
+
+		// 反转止盈提醒
+		if exitMode == "reversal" && plan.ReversalTriggerPct > 0 && favorablePct >= plan.ReversalTriggerPct {
+			logs = append(logs, fmt.Sprintf("⚠️ %s %s 已满足反转止盈阈值 %.2f%%，等待AI发出close指令", pos.Symbol, positionSide, plan.ReversalTriggerPct))
+		}
+	}
+
+	return logs
+}
+
+func (at *AutoTrader) registerProtectionPlan(symbol, side string, entryPrice float64, plan *decision.ProtectionPlan, initialStop float64) {
+	if plan == nil {
+		return
+	}
+	key := positionKey(symbol, side)
+	planCopy := *plan
+	at.protectionPlans[key] = &protectionState{
+		Plan:             planCopy,
+		Side:             strings.ToLower(side),
+		EntryPrice:       entryPrice,
+		RegisteredAt:     time.Now(),
+		BreakevenApplied: false,
+		LastStopPrice:    initialStop,
+	}
+}
+
+func (at *AutoTrader) unregisterProtectionPlan(symbol, side string) {
+	key := positionKey(symbol, side)
+	delete(at.protectionPlans, key)
+}
+
+func (at *AutoTrader) mergeProtectionPlan(symbol string, plan *decision.ProtectionPlan) bool {
+	if plan == nil {
+		return false
+	}
+	for _, side := range []string{"long", "short"} {
+		key := positionKey(symbol, side)
+		if state, ok := at.protectionPlans[key]; ok {
+			state.Plan = *plan
+			return true
+		}
+	}
+	return false
+}
+
+func positionKey(symbol, side string) string {
+	return fmt.Sprintf("%s_%s", symbol, strings.ToLower(side))
+}
+
+func calcFavorablePct(side string, entryPrice, markPrice float64) float64 {
+	if entryPrice == 0 {
+		return 0
+	}
+	if side == "long" {
+		return (markPrice - entryPrice) / entryPrice * 100
+	}
+	return (entryPrice - markPrice) / entryPrice * 100
+}
+
+func breakEvenStopPrice(side string, entryPrice, offsetPct float64) float64 {
+	if side == "long" {
+		return entryPrice * (1 + offsetPct/100)
+	}
+	return entryPrice * (1 - offsetPct/100)
+}
+
+func trailingStopCandidate(side string, currentPrice, distancePct float64) float64 {
+	if side == "long" {
+		return currentPrice * (1 - distancePct/100)
+	}
+	return currentPrice * (1 + distancePct/100)
+}
+
+func shouldUpdateStop(previous, candidate float64, isLong bool) bool {
+	if candidate <= 0 {
+		return false
+	}
+	if previous <= 0 {
+		return true
+	}
+	if isLong {
+		return candidate > previous*(1+stopUpdateTolerance)
+	}
+	return candidate < previous*(1-stopUpdateTolerance)
 }
 
 // executeDecisionWithRecord 执行AI决策并记录详细信息
@@ -549,7 +834,25 @@ func (at *AutoTrader) executeDecisionWithRecord(decision *decision.Decision, act
 	case "close_short":
 		return at.executeCloseShortWithRecord(decision, actionRecord)
 	case "hold", "wait":
-		// 无需执行，仅记录
+		if decision.Protection != nil && at.mergeProtectionPlan(decision.Symbol, decision.Protection) {
+			exitMode := decision.Protection.ExitMode
+			if exitMode == "" {
+				exitMode = "trailing"
+			}
+			msg := fmt.Sprintf("  🛡 更新 %s 保护计划[%s]: hold≥%dmin, BE%.2f%%/%.2f%%, Trail %.2f%% @ %.2f%%",
+				decision.Symbol,
+				strings.ToUpper(exitMode),
+				decision.Protection.MinHoldMinutes,
+				decision.Protection.BreakEvenTriggerPct,
+				decision.Protection.BreakEvenOffsetPct,
+				decision.Protection.TrailDistancePct,
+				decision.Protection.TrailActivationPct,
+			)
+			if exitMode == "reversal" && decision.Protection.ReversalTriggerPct > 0 {
+				msg = fmt.Sprintf("%s, Reversal %.2f%%", msg, decision.Protection.ReversalTriggerPct)
+			}
+			log.Println(msg)
+		}
 		return nil
 	default:
 		return fmt.Errorf("未知的action: %s", decision.Action)
@@ -602,9 +905,22 @@ func (at *AutoTrader) executeOpenLongWithRecord(decision *decision.Decision, act
 	if err := at.trader.SetStopLoss(decision.Symbol, "LONG", quantity, decision.StopLoss); err != nil {
 		log.Printf("  ⚠ 设置止损失败: %v", err)
 	}
-	if err := at.trader.SetTakeProfit(decision.Symbol, "LONG", quantity, decision.TakeProfit); err != nil {
-		log.Printf("  ⚠ 设置止盈失败: %v", err)
+	exitMode := ""
+	if decision.Protection != nil {
+		exitMode = strings.ToLower(decision.Protection.ExitMode)
 	}
+	if exitMode == "" {
+		exitMode = "trailing"
+	}
+	if exitMode == "fixed" {
+		if err := at.trader.SetTakeProfit(decision.Symbol, "LONG", quantity, decision.TakeProfit); err != nil {
+			log.Printf("  ⚠ 设置止盈失败: %v", err)
+		}
+	} else {
+		log.Printf("  ℹ️ 止盈由 %s 策略管理，跳过静态止盈单", exitMode)
+	}
+
+	at.registerProtectionPlan(decision.Symbol, "long", marketData.CurrentPrice, decision.Protection, decision.StopLoss)
 
 	return nil
 }
@@ -655,9 +971,22 @@ func (at *AutoTrader) executeOpenShortWithRecord(decision *decision.Decision, ac
 	if err := at.trader.SetStopLoss(decision.Symbol, "SHORT", quantity, decision.StopLoss); err != nil {
 		log.Printf("  ⚠ 设置止损失败: %v", err)
 	}
-	if err := at.trader.SetTakeProfit(decision.Symbol, "SHORT", quantity, decision.TakeProfit); err != nil {
-		log.Printf("  ⚠ 设置止盈失败: %v", err)
+	exitMode := ""
+	if decision.Protection != nil {
+		exitMode = strings.ToLower(decision.Protection.ExitMode)
 	}
+	if exitMode == "" {
+		exitMode = "trailing"
+	}
+	if exitMode == "fixed" {
+		if err := at.trader.SetTakeProfit(decision.Symbol, "SHORT", quantity, decision.TakeProfit); err != nil {
+			log.Printf("  ⚠ 设置止盈失败: %v", err)
+		}
+	} else {
+		log.Printf("  ℹ️ 止盈由 %s 策略管理，跳过静态止盈单", exitMode)
+	}
+
+	at.registerProtectionPlan(decision.Symbol, "short", marketData.CurrentPrice, decision.Protection, decision.StopLoss)
 
 	return nil
 }
@@ -684,7 +1013,13 @@ func (at *AutoTrader) executeCloseLongWithRecord(decision *decision.Decision, ac
 		actionRecord.OrderID = orderID
 	}
 
-	log.Printf("  ✓ 平仓成功")
+	if income, err := at.fetchRealizedPnL(decision.Symbol); err == nil {
+		actionRecord.RealizedPnL = income
+		log.Printf("  ✓ 平仓成功，实际盈亏 %.2f", income)
+	} else {
+		log.Printf("  ✓ 平仓成功（盈亏查询失败: %v）", err)
+	}
+	at.unregisterProtectionPlan(decision.Symbol, "long")
 	return nil
 }
 
@@ -710,8 +1045,37 @@ func (at *AutoTrader) executeCloseShortWithRecord(decision *decision.Decision, a
 		actionRecord.OrderID = orderID
 	}
 
-	log.Printf("  ✓ 平仓成功")
+	if income, err := at.fetchRealizedPnL(decision.Symbol); err == nil {
+		actionRecord.RealizedPnL = income
+		log.Printf("  ✓ 平仓成功，实际盈亏 %.2f", income)
+	} else {
+		log.Printf("  ✓ 平仓成功（盈亏查询失败: %v）", err)
+	}
+	at.unregisterProtectionPlan(decision.Symbol, "short")
 	return nil
+}
+
+func (at *AutoTrader) fetchRealizedPnL(symbol string) (float64, error) {
+	futuresTrader, ok := at.trader.(*FuturesTrader)
+	if !ok {
+		return 0, fmt.Errorf("当前交易器不支持收益查询")
+	}
+
+	endTime := time.Now()
+	startTime := endTime.Add(-5 * time.Minute)
+
+	incomes, err := futuresTrader.GetTradeIncome(symbol, startTime.UnixMilli(), endTime.UnixMilli(), 20)
+	if err != nil {
+		return 0, err
+	}
+
+	if len(incomes) == 0 {
+		return 0, fmt.Errorf("未获取到%s的收益记录", symbol)
+	}
+
+	latest := incomes[len(incomes)-1]
+	amount, _ := strconv.ParseFloat(latest.Income, 64)
+	return amount, nil
 }
 
 // GetID 获取trader ID

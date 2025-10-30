@@ -49,15 +49,16 @@ type PositionSnapshot struct {
 
 // DecisionAction 决策动作
 type DecisionAction struct {
-	Action    string    `json:"action"`    // open_long, open_short, close_long, close_short
-	Symbol    string    `json:"symbol"`    // 币种
-	Quantity  float64   `json:"quantity"`  // 数量
-	Leverage  int       `json:"leverage"`  // 杠杆（开仓时）
-	Price     float64   `json:"price"`     // 执行价格
-	OrderID   int64     `json:"order_id"`  // 订单ID
-	Timestamp time.Time `json:"timestamp"` // 执行时间
-	Success   bool      `json:"success"`   // 是否成功
-	Error     string    `json:"error"`     // 错误信息
+	Action      string    `json:"action"`    // open_long, open_short, close_long, close_short
+	Symbol      string    `json:"symbol"`    // 币种
+	Quantity    float64   `json:"quantity"`  // 数量
+	Leverage    int       `json:"leverage"`  // 杠杆（开仓时）
+	Price       float64   `json:"price"`     // 执行价格
+	OrderID     int64     `json:"order_id"`  // 订单ID
+	Timestamp   time.Time `json:"timestamp"` // 执行时间
+	Success     bool      `json:"success"`   // 是否成功
+	Error       string    `json:"error"`     // 错误信息
+	RealizedPnL float64   `json:"realized_pnl"`
 }
 
 // DecisionLogger 决策日志记录器
@@ -147,6 +148,20 @@ func (l *DecisionLogger) GetLatestRecords(n int) ([]*DecisionRecord, error) {
 		records[i], records[j] = records[j], records[i]
 	}
 
+	// 仅保留最近一次运行的记录：找到最后一次cycleNumber回到1的位置
+	if len(records) > 0 {
+		lastStart := -1
+		for i := len(records) - 1; i >= 0; i-- {
+			if records[i].CycleNumber == 1 {
+				lastStart = i
+				break
+			}
+		}
+		if lastStart > 0 {
+			records = records[lastStart:]
+		}
+	}
+
 	return records, nil
 }
 
@@ -217,8 +232,7 @@ func (l *DecisionLogger) GetStatistics() (*Statistics, error) {
 		return nil, fmt.Errorf("读取日志目录失败: %w", err)
 	}
 
-	stats := &Statistics{}
-
+	var records []*DecisionRecord
 	for _, file := range files {
 		if file.IsDir() {
 			continue
@@ -235,6 +249,28 @@ func (l *DecisionLogger) GetStatistics() (*Statistics, error) {
 			continue
 		}
 
+		records = append(records, &record)
+	}
+
+	if len(records) == 0 {
+		return &Statistics{}, nil
+	}
+
+	// 仅统计最近一次运行的数据
+	startIdx := 0
+	for i := len(records) - 1; i >= 0; i-- {
+		if records[i].CycleNumber == 1 {
+			startIdx = i
+			break
+		}
+	}
+	if startIdx > 0 {
+		records = records[startIdx:]
+	}
+
+	stats := &Statistics{}
+
+	for _, record := range records {
 		stats.TotalCycles++
 
 		for _, action := range record.Decisions {
@@ -255,16 +291,29 @@ func (l *DecisionLogger) GetStatistics() (*Statistics, error) {
 		}
 	}
 
+	if stats.TotalCycles > 0 {
+		if performance, err := l.AnalyzePerformance(stats.TotalCycles); err == nil && performance != nil {
+			stats.TotalTrades = performance.TotalTrades
+			stats.WinningTrades = performance.WinningTrades
+			stats.LosingTrades = performance.LosingTrades
+			stats.WinRate = performance.WinRate
+		}
+	}
+
 	return stats, nil
 }
 
 // Statistics 统计信息
 type Statistics struct {
-	TotalCycles         int `json:"total_cycles"`
-	SuccessfulCycles    int `json:"successful_cycles"`
-	FailedCycles        int `json:"failed_cycles"`
-	TotalOpenPositions  int `json:"total_open_positions"`
-	TotalClosePositions int `json:"total_close_positions"`
+	TotalCycles         int     `json:"total_cycles"`
+	SuccessfulCycles    int     `json:"successful_cycles"`
+	FailedCycles        int     `json:"failed_cycles"`
+	TotalOpenPositions  int     `json:"total_open_positions"`
+	TotalClosePositions int     `json:"total_close_positions"`
+	TotalTrades         int     `json:"total_trades"`
+	WinningTrades       int     `json:"winning_trades"`
+	LosingTrades        int     `json:"losing_trades"`
+	WinRate             float64 `json:"win_rate"`
 }
 
 // TradeOutcome 单笔交易结果
@@ -366,18 +415,23 @@ func (l *DecisionLogger) AnalyzePerformance(lookbackCycles int) (*PerformanceAna
 					quantity := openPos["quantity"].(float64)
 					leverage := openPos["leverage"].(int)
 
-					// 计算盈亏百分比
-					pnlPct := 0.0
-					if side == "long" {
-						pnlPct = ((action.Price - openPrice) / openPrice) * 100
-					} else {
-						pnlPct = ((openPrice - action.Price) / openPrice) * 100
-					}
-
-					// 计算实际盈亏（USDT）
-					// PnL = 仓位价值 × 价格变化百分比 × 杠杆倍数
 					positionValue := quantity * openPrice
-					pnl := positionValue * (pnlPct / 100) * float64(leverage)
+					pnl := 0.0
+					pnlPct := 0.0
+
+					if action.RealizedPnL != 0 {
+						pnl = action.RealizedPnL
+						if positionValue > 0 {
+							pnlPct = (pnl / positionValue) * 100
+						}
+					} else {
+						if side == "long" {
+							pnlPct = ((action.Price - openPrice) / openPrice) * 100
+						} else {
+							pnlPct = ((openPrice - action.Price) / openPrice) * 100
+						}
+						pnl = positionValue * (pnlPct / 100) * float64(leverage)
+					}
 
 					// 记录交易结果
 					outcome := TradeOutcome{
@@ -448,22 +502,37 @@ func (l *DecisionLogger) AnalyzePerformance(lookbackCycles int) (*PerformanceAna
 	}
 
 	// 计算各币种胜率和平均盈亏
-	bestPnL := -999999.0
-	worstPnL := 999999.0
+	bestPnL := 0.0
+	worstPnL := 0.0
+	hasBest := false
+	hasWorst := false
 	for symbol, stats := range analysis.SymbolStats {
 		if stats.TotalTrades > 0 {
 			stats.WinRate = (float64(stats.WinningTrades) / float64(stats.TotalTrades)) * 100
 			stats.AvgPnL = stats.TotalPnL / float64(stats.TotalTrades)
 
-			if stats.TotalPnL > bestPnL {
-				bestPnL = stats.TotalPnL
-				analysis.BestSymbol = symbol
+			if stats.TotalPnL > 0 {
+				if !hasBest || stats.TotalPnL > bestPnL {
+					bestPnL = stats.TotalPnL
+					analysis.BestSymbol = symbol
+					hasBest = true
+				}
 			}
-			if stats.TotalPnL < worstPnL {
-				worstPnL = stats.TotalPnL
-				analysis.WorstSymbol = symbol
+			if stats.TotalPnL < 0 {
+				if !hasWorst || stats.TotalPnL < worstPnL {
+					worstPnL = stats.TotalPnL
+					analysis.WorstSymbol = symbol
+					hasWorst = true
+				}
 			}
 		}
+	}
+
+	if !hasBest {
+		analysis.BestSymbol = ""
+	}
+	if !hasWorst {
+		analysis.WorstSymbol = ""
 	}
 
 	// 只保留最近的交易（倒序：最新的在前）

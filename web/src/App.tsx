@@ -201,21 +201,6 @@ function App() {
                 </button>
               </div>
 
-              {traders && traders.length > 0 && (
-                <select
-                  value={selectedTraderId}
-                  onChange={(e) => setSelectedTraderId(e.target.value)}
-                  className="rounded px-3 py-2 text-sm font-medium cursor-pointer transition-colors"
-                  style={{ background: '#1E2329', border: '1px solid #2B3139', color: '#EAECEF' }}
-                >
-                  {traders.map((trader) => (
-                    <option key={trader.trader_id} value={trader.trader_id}>
-                      {trader.trader_name} ({trader.ai_model.toUpperCase()})
-                    </option>
-                  ))}
-                </select>
-              )}
-
               {status && (
                 <div
                   className="flex items-center gap-2 px-3 py-2 rounded justify-center"
@@ -277,24 +262,6 @@ function App() {
                     EN
                   </button>
                 </div>
-
-                {traders && traders.length > 0 && (
-                  <select
-                    value={selectedTraderId}
-                    onChange={(e) => {
-                      setSelectedTraderId(e.target.value);
-                      setIsMenuOpen(false);
-                    }}
-                    className="rounded px-3 py-2 text-sm font-medium cursor-pointer transition-colors w-full"
-                    style={{ background: '#0B0E11', border: '1px solid #2B3139', color: '#EAECEF' }}
-                  >
-                    {traders.map((trader) => (
-                      <option key={trader.trader_id} value={trader.trader_id}>
-                        {trader.trader_name} ({trader.ai_model.toUpperCase()})
-                      </option>
-                    ))}
-                  </select>
-                )}
 
                 {status && (
                   <div
@@ -378,6 +345,7 @@ function TraderDetailsPage({
   account,
   positions,
   decisions,
+  stats,
   lastUpdate,
   language,
 }: {
@@ -417,6 +385,8 @@ function TraderDetailsPage({
       </div>
     );
   }
+
+  const baselineBalance = account?.initial_balance ?? status?.initial_balance ?? 20;
 
   return (
     <div>
@@ -459,11 +429,7 @@ function TraderDetailsPage({
           value={`${account?.total_equity?.toFixed(2) || '0.00'} USDT`}
           change={account?.total_pnl_pct || 0}
           positive={(account?.total_pnl ?? 0) > 0}
-          subtitle={
-            ((account?.initial_balance ?? status?.initial_balance) !== undefined)
-              ? `${t('initialBalance', language)}: ${(account?.initial_balance ?? status?.initial_balance)?.toFixed(2)} USDT`
-              : undefined
-          }
+          subtitle={`${t('initialBalance', language)}: ${baselineBalance.toFixed(2)} USDT`}
         />
         <StatCard
           title={t('availableBalance', language)}
@@ -482,6 +448,29 @@ function TraderDetailsPage({
           subtitle={`${t('margin', language)}: ${account?.margin_used_pct?.toFixed(1) || '0.0'}%`}
         />
       </div>
+
+      {stats && (
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
+          <StatCard
+            title={t('entriesExecuted', language)}
+            value={`${stats.total_open_positions}`}
+            subtitle={t('sinceLaunch', language)}
+          />
+          <StatCard
+            title={t('exitsExecuted', language)}
+            value={`${stats.total_close_positions}`}
+            subtitle={t('sinceLaunch', language)}
+          />
+          <StatCard
+            title={t('winRate', language)}
+            value={`${stats.win_rate?.toFixed(1) || '0.0'}%`}
+            subtitle={t('winsLosses', language, {
+              wins: stats.winning_trades ?? 0,
+              losses: stats.losing_trades ?? 0,
+            })}
+          />
+        </div>
+      )}
 
       {/* 主要内容区：左右分屏 */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">

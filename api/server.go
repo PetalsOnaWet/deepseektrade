@@ -59,6 +59,9 @@ func corsMiddleware() gin.HandlerFunc {
 func (s *Server) setupRoutes() {
 	// 健康检查
 	s.router.GET("/health", s.handleHealth)
+	s.router.HEAD("/health", func(c *gin.Context) {
+		c.Status(http.StatusOK)
+	})
 
 	// API路由组
 	api := s.router.Group("/api")
@@ -325,39 +328,34 @@ func (s *Server) handleEquityHistory(c *gin.Context) {
 		CycleNumber      int     `json:"cycle_number"`
 	}
 
-	// 从AutoTrader获取初始余额（用于计算盈亏百分比）
-	initialBalance := 0.0
-	if status := trader.GetStatus(); status != nil {
-		if ib, ok := status["initial_balance"].(float64); ok && ib > 0 {
-			initialBalance = ib
-		}
-	}
-
-	// 如果无法从status获取，且有历史记录，则从第一条记录获取
-	if initialBalance == 0 && len(records) > 0 {
-		// 第一条记录的equity作为初始余额
-		initialBalance = records[0].AccountState.TotalBalance
-	}
-
-	// 如果还是无法获取，返回错误
-	if initialBalance == 0 {
+	if len(records) == 0 {
 		c.JSON(http.StatusInternalServerError, gin.H{
-			"error": "无法获取初始余额",
+			"error": "无可用历史记录",
 		})
 		return
 	}
+
+	baselineEquity := records[0].AccountState.TotalBalance
+	if baselineEquity == 0 {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": "初始净值无效",
+		})
+		return
+	}
+	baselinePnL := records[0].AccountState.TotalUnrealizedProfit
 
 	var history []EquityPoint
 	for _, record := range records {
 		// TotalBalance字段实际存储的是TotalEquity
 		totalEquity := record.AccountState.TotalBalance
-		// TotalUnrealizedProfit字段实际存储的是TotalPnL（相对初始余额）
-		totalPnL := record.AccountState.TotalUnrealizedProfit
+		// TotalUnrealizedProfit字段实际存储的是TotalPnL（相对配置初始余额）
+		// 为了重置曲线，改用相对本轮起点的盈亏
+		totalPnL := record.AccountState.TotalUnrealizedProfit - baselinePnL
 
 		// 计算盈亏百分比
 		totalPnLPct := 0.0
-		if initialBalance > 0 {
-			totalPnLPct = (totalPnL / initialBalance) * 100
+		if baselineEquity > 0 {
+			totalPnLPct = ((totalEquity - baselineEquity) / baselineEquity) * 100
 		}
 
 		history = append(history, EquityPoint{

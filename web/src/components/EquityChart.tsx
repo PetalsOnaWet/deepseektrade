@@ -81,9 +81,11 @@ export function EquityChart({ traderId }: EquityChartProps) {
     : history;
 
   // 计算初始余额（使用第一个数据点，如果无数据则从account获取，最后才用默认值）
-  const initialBalance = history[0]?.total_equity
-    || account?.total_equity
-    || 100;  // 默认值改为100，与常见配置一致
+  const initialBalance =
+    history[0]?.total_equity ??
+    account?.initial_balance ??
+    account?.total_equity ??
+    20;  // 默认20U
 
   // 转换数据格式
   const chartData = displayHistory.map((point) => {
@@ -175,8 +177,7 @@ export function EquityChart({ traderId }: EquityChartProps) {
                   border: `1px solid ${isProfit ? 'rgba(14, 203, 129, 0.2)' : 'rgba(246, 70, 93, 0.2)'}`
                 }}
               >
-                {isProfit ? '▲' : '▼'} {isProfit ? '+' : ''}
-                {currentValue.raw_pnl_pct}%
+                {isProfit ? '+' : ''}{currentValue.raw_pnl_pct}%
               </span>
               <span className="text-sm mono" style={{ color: '#848E9C' }}>
                 ({isProfit ? '+' : ''}{currentValue.raw_pnl.toFixed(2)} USDT)
@@ -198,7 +199,7 @@ export function EquityChart({ traderId }: EquityChartProps) {
               : { background: 'transparent', color: '#848E9C' }
             }
           >
-            💵 USDT
+            USDT
           </button>
           <button
             onClick={() => setDisplayMode('percent')}
@@ -208,7 +209,7 @@ export function EquityChart({ traderId }: EquityChartProps) {
               : { background: 'transparent', color: '#848E9C' }
             }
           >
-            📊 %
+            %
           </button>
         </div>
       </div>
