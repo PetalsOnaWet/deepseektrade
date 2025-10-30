@@ -15,8 +15,8 @@ export const translations = {
     referralWalletSubtitle: 'Activate with BTCB888 and save on fees',
 
     // Footer
-    footerTitle: 'NOFX - AI Trading Competition System',
-    footerWarning: '⚠️ Trading involves risk. Use at your own discretion.',
+    footerTitle: 'Trend Trading Assistant',
+    footerWarning: '⚠️ Trading involves risk. Exercise independent judgment.',
 
     // Stats Cards
     totalEquity: 'Total Equity',
@@ -137,8 +137,8 @@ export const translations = {
     referralWalletSubtitle: '使用 BTCB888 解锁专属福利',
 
     // Footer
-    footerTitle: 'NOFX - AI交易竞赛系统',
-    footerWarning: '⚠️ 交易有风险，请谨慎使用。',
+    footerTitle: '趋势交易助手',
+    footerWarning: '⚠️ 交易有风险，请独立判断。',
 
     // Stats Cards
     totalEquity: '总净值',
