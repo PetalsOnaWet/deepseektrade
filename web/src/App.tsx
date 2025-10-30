@@ -16,6 +16,14 @@ import type {
 
 function App() {
   const { language, setLanguage } = useLanguage();
+  useEffect(() => {
+    const path = window.location.pathname;
+    if (path.startsWith('/zh')) {
+      setLanguage('zh');
+    } else {
+      setLanguage('en');
+    }
+  }, [setLanguage]);
   const [selectedTraderId, setSelectedTraderId] = useState<string | undefined>();
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [lastUpdate, setLastUpdate] = useState<string>('--:--:--');
