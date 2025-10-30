@@ -807,6 +807,18 @@ func validateDecision(d *Decision, ctx *Context) error {
 		maxAllowedRisk := ctx.Account.TotalEquity * 0.03
 		// 允许少量浮动以避免因精度导致的误判
 		riskTolerance := math.Max(0.05, maxAllowedRisk*0.02)
+		if riskUSD > maxAllowedRisk+riskTolerance && riskUSD > 0 {
+			scale := maxAllowedRisk / riskUSD
+			if scale <= 0 {
+				return fmt.Errorf("%s 风险敞口 %.2f USDT 超出账户净值3%%限制 (最大允许 %.2f)", d.Symbol, riskUSD, maxAllowedRisk)
+			}
+			adjustedSize := d.PositionSizeUSD * scale
+			if adjustedSize <= 0 {
+				return fmt.Errorf("%s 调整后仓位无效，放弃开仓", d.Symbol)
+			}
+			d.PositionSizeUSD = adjustedSize
+			riskUSD = (priceDiff / currentPrice) * adjustedSize
+		}
 		if riskUSD > maxAllowedRisk+riskTolerance {
 			return fmt.Errorf("%s 风险敞口 %.2f USDT 超出账户净值3%%限制 (最大允许 %.2f)", d.Symbol, riskUSD, maxAllowedRisk)
 		}

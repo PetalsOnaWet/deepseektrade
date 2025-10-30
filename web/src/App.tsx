@@ -855,9 +855,8 @@ function DecisionCard({ decision, language }: { decision: DecisionRecord; langua
 function SeoSection({ language }: { language: Language }) {
   const isZh = language === 'zh';
   const sectionStyle: React.CSSProperties = {
-    background: '#111827',
-    borderTop: '1px solid #2B3139',
-    borderBottom: '1px solid #2B3139',
+    background: '#0B0E11',
+    borderTop: '1px solid #1F262F',
     marginTop: '2.5rem',
   };
   const containerStyle: React.CSSProperties = {
