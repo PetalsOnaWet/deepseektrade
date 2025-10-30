@@ -681,12 +681,12 @@ function TraderDetailsPage({
         {/* 右侧结束 */}
       </div>
 
-      <SeoSection language={language} />
-
       {/* AI Learning & Performance Analysis */}
       <div className="mb-6 animate-slide-in" style={{ animationDelay: '0.3s' }}>
         <AILearning traderId={selectedTrader.trader_id} />
       </div>
+
+      <SeoSection language={language} />
     </div>
   );
 }
@@ -854,21 +854,23 @@ function DecisionCard({ decision, language }: { decision: DecisionRecord; langua
 
 function SeoSection({ language }: { language: Language }) {
   const isZh = language === 'zh';
+  const sectionStyle: React.CSSProperties = {
+    background: '#111827',
+    borderTop: '1px solid #2B3139',
+    borderBottom: '1px solid #2B3139',
+    marginTop: '2.5rem',
+  };
   const containerStyle: React.CSSProperties = {
-    maxWidth: '960px',
-    margin: '2rem auto 3rem',
-    padding: '1.6rem 1.8rem 2rem',
-    background: '#0f172a',
-    border: '1px solid #1f2937',
-    borderRadius: '18px',
+    maxWidth: '1920px',
+    margin: '0 auto',
+    padding: '2.5rem clamp(1.5rem, 4vw, 4rem)',
     lineHeight: 1.7,
-    color: '#e5e7eb',
-    boxShadow: '0 24px 40px rgba(15, 23, 42, 0.28)',
+    color: '#EAECEF',
   };
   const headingStyle: React.CSSProperties = {
     marginTop: '1.4rem',
     fontSize: '1.25rem',
-    color: '#f8fafc',
+    color: '#F8FAFC',
   };
   const listStyle: React.CSSProperties = {
     paddingLeft: '1.2rem',
@@ -964,23 +966,25 @@ function SeoSection({ language }: { language: Language }) {
       ];
 
   return (
-    <section style={containerStyle}>
-      <span style={taglineStyle}>{isZh ? '加密货币 AI 实盘直播' : 'Live crypto AI trading dashboard'}</span>
-      {content.map((section) => (
-        <div key={section.title}>
-          <h2 style={headingStyle}>{section.title}</h2>
-          {section.body?.map((paragraph, idx) => (
-            <p key={idx}>{paragraph}</p>
-          ))}
-          {section.list && (
-            <ul style={listStyle}>
-              {section.list.map((item, idx) => (
-                <li key={idx}>{item}</li>
-              ))}
-            </ul>
-          )}
-        </div>
-      ))}
+    <section className="-mx-4 sm:-mx-6 lg:-mx-10" style={sectionStyle}>
+      <div style={containerStyle}>
+        <span style={taglineStyle}>{isZh ? '加密货币 AI 实盘直播' : 'Live crypto AI trading dashboard'}</span>
+        {content.map((section) => (
+          <div key={section.title}>
+            <h2 style={headingStyle}>{section.title}</h2>
+            {section.body?.map((paragraph, idx) => (
+              <p key={idx}>{paragraph}</p>
+            ))}
+            {section.list && (
+              <ul style={listStyle}>
+                {section.list.map((item, idx) => (
+                  <li key={idx}>{item}</li>
+                ))}
+              </ul>
+            )}
+          </div>
+        ))}
+      </div>
     </section>
   );
 }
