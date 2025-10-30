@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
-	"math"
 	"nofx/decision"
 	"nofx/logger"
 	"nofx/market"
@@ -483,7 +482,7 @@ func (at *AutoTrader) buildTradingContext() (*decision.Context, error) {
 			protection = &planCopy
 			currentStop := state.LastStopPrice
 			if currentStop > 0 {
-				riskUSD = calculatePositionRisk(entryPrice, currentStop, quantity)
+				riskUSD = calculatePositionRisk(side, entryPrice, currentStop, quantity)
 			}
 
 			regMillis := int64(0)
@@ -649,11 +648,24 @@ func (at *AutoTrader) buildTradingContext() (*decision.Context, error) {
 	return ctx, nil
 }
 
-func calculatePositionRisk(entryPrice, stopPrice, quantity float64) float64 {
+func calculatePositionRisk(side string, entryPrice, stopPrice, quantity float64) float64 {
 	if entryPrice <= 0 || stopPrice <= 0 || quantity <= 0 {
 		return 0
 	}
-	return math.Abs(entryPrice-stopPrice) * quantity
+	switch strings.ToLower(side) {
+	case "long":
+		if stopPrice >= entryPrice {
+			return 0
+		}
+		return (entryPrice - stopPrice) * quantity
+	case "short":
+		if stopPrice <= entryPrice {
+			return 0
+		}
+		return (stopPrice - entryPrice) * quantity
+	default:
+		return 0
+	}
 }
 
 // applyProtectionPlans 根据风控计划自动调整止损

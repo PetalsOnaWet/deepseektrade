@@ -441,6 +441,11 @@ func (t *FuturesTrader) SetStopLoss(symbol string, positionSide string, quantity
 		posSide = futures.PositionSideTypeShort
 	}
 
+	// 更新止损前，清理同向已有的止损单，避免累积导致 API 拒绝
+	if err := t.cancelExistingStopOrders(symbol, posSide); err != nil {
+		log.Printf("  ⚠ 清理旧止损失败: %v", err)
+	}
+
 	// 格式化数量
 	quantityStr, err := t.FormatQuantity(symbol, quantity)
 	if err != nil {
@@ -468,6 +473,38 @@ func (t *FuturesTrader) SetStopLoss(symbol string, positionSide string, quantity
 	}
 
 	log.Printf("  止损价设置: %s", stopPriceStr)
+	return nil
+}
+
+func (t *FuturesTrader) cancelExistingStopOrders(symbol string, posSide futures.PositionSideType) error {
+	openOrders, err := t.client.NewListOpenOrdersService().
+		Symbol(symbol).
+		Do(context.Background())
+	if err != nil {
+		return fmt.Errorf("查询挂单失败: %w", err)
+	}
+
+	for _, order := range openOrders {
+		if futures.PositionSideType(order.PositionSide) != posSide {
+			continue
+		}
+		orderType := futures.OrderType(order.Type)
+		if orderType != futures.OrderTypeStop &&
+			orderType != futures.OrderTypeStopMarket &&
+			orderType != futures.OrderTypeTrailingStopMarket {
+			continue
+		}
+
+		_, cancelErr := t.client.NewCancelOrderService().
+			Symbol(symbol).
+			OrderID(order.OrderID).
+			Do(context.Background())
+		if cancelErr != nil {
+			log.Printf("  ⚠ 取消旧止损单失败 [%s #%d]: %v", symbol, order.OrderID, cancelErr)
+		} else {
+			log.Printf("  ✓ 已撤销旧止损单 [%s #%d]", symbol, order.OrderID)
+		}
+	}
 	return nil
 }
 

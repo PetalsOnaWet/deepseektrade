@@ -785,14 +785,29 @@ func validateDecision(d *Decision, ctx *Context) error {
 			return fmt.Errorf("%s 当前价格无效，无法验证风险敞口", d.Symbol)
 		}
 
-		priceDiff := math.Abs(currentPrice - d.StopLoss)
-		if priceDiff == 0 {
-			return fmt.Errorf("%s 止损价与入场价相同，风险计算无意义", d.Symbol)
+		var priceDiff float64
+		if d.Action == "open_long" {
+			if d.StopLoss >= currentPrice {
+				priceDiff = 0
+			} else {
+				priceDiff = currentPrice - d.StopLoss
+			}
+		} else {
+			if d.StopLoss <= currentPrice {
+				priceDiff = 0
+			} else {
+				priceDiff = d.StopLoss - currentPrice
+			}
 		}
 
-		riskUSD := (priceDiff / currentPrice) * d.PositionSizeUSD
+		riskUSD := 0.0
+		if priceDiff > 0 && currentPrice > 0 {
+			riskUSD = (priceDiff / currentPrice) * d.PositionSizeUSD
+		}
 		maxAllowedRisk := ctx.Account.TotalEquity * 0.03
-		if riskUSD > maxAllowedRisk {
+		// 允许少量浮动以避免因精度导致的误判
+		riskTolerance := math.Max(0.05, maxAllowedRisk*0.02)
+		if riskUSD > maxAllowedRisk+riskTolerance {
 			return fmt.Errorf("%s 风险敞口 %.2f USDT 超出账户净值3%%限制 (最大允许 %.2f)", d.Symbol, riskUSD, maxAllowedRisk)
 		}
 		d.RiskUSD = riskUSD
